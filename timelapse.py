@@ -162,7 +162,7 @@ class TimelapseManager:
                 return {"active": False}
             s = self._session
             now = s.end_time if s.end_time else time.time()
-            return {
+            result = {
                 "active": s.status == "running",
                 "id": s.id,
                 "name": s.name,
@@ -182,6 +182,15 @@ class TimelapseManager:
                 "sunrise_offset_min": s.sunrise_offset_min,
                 "sunset_offset_min": s.sunset_offset_min,
             }
+            if s.daylight_only and s.status == "running":
+                dl_start, dl_end = _daylight_window(
+                    s.latitude, s.longitude, s.sunrise_offset_min, s.sunset_offset_min
+                )
+                now_utc = datetime.now(timezone.utc)
+                result["daylight_paused"] = not (dl_start <= now_utc <= dl_end)
+                result["daylight_resume_ts"] = dl_start.timestamp()
+                result["daylight_pause_ts"] = dl_end.timestamp()
+            return result
 
     def list_timelapses(self) -> list:
         results = []

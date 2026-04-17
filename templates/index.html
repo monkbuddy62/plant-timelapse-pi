@@ -194,6 +194,7 @@
     letter-spacing: 0.5px;
   }
   .badge-running { background: var(--green-dim); color: var(--green); }
+  .badge-paused { background: #292010; color: var(--yellow); }
   .badge-compiling { background: #292524; color: var(--yellow); }
   .badge-done { background: #1a2e1a; color: var(--green); }
   .badge-error { background: #2d1515; color: var(--red); }
@@ -762,10 +763,13 @@ async function fetchTlStatus() {
     const dlRow = document.getElementById('st-daylight-row');
     if (d.daylight_only) {
       dlRow.style.display = '';
-      const riseOff = d.sunrise_offset_min ? `+${d.sunrise_offset_min}m` : '';
-      const setOff  = d.sunset_offset_min  ? `-${d.sunset_offset_min}m`  : '';
-      document.getElementById('st-daylight').textContent =
-        `sunrise${riseOff} → sunset${setOff}`;
+      const fmtTime = ts => new Date(ts * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+      const resumeStr = d.daylight_resume_ts ? fmtTime(d.daylight_resume_ts) : '—';
+      const pauseStr  = d.daylight_pause_ts  ? fmtTime(d.daylight_pause_ts)  : '—';
+      const note = d.daylight_paused
+        ? `Resumes ${resumeStr} · Stops ${pauseStr}`
+        : `Active until ${pauseStr} · Resumes ${resumeStr} tomorrow`;
+      document.getElementById('st-daylight').textContent = note;
     } else {
       dlRow.style.display = 'none';
     }
@@ -776,13 +780,15 @@ async function fetchTlStatus() {
     watchBtn.dataset.name = d.name;
 
     const badge = document.getElementById('st-badge');
+    const displayStatus = (d.status === 'running' && d.daylight_paused) ? 'paused_night' : d.status;
     const statusMap = {
-      running: ['badge-running', 'Running'],
-      compiling: ['badge-compiling', 'Compiling…'],
-      done: ['badge-done', 'Done'],
-      error: ['badge-error', 'Error'],
+      running:      ['badge-running',   'Running'],
+      paused_night: ['badge-paused',    'Paused — Night'],
+      compiling:    ['badge-compiling', 'Compiling…'],
+      done:         ['badge-done',      'Done'],
+      error:        ['badge-error',     'Error'],
     };
-    const [cls, label] = statusMap[d.status] || ['', d.status];
+    const [cls, label] = statusMap[displayStatus] || ['', d.status];
     badge.innerHTML = `<span class="badge ${cls}">${label}</span>`;
 
     document.getElementById('btn-stop').style.display = d.active ? 'block' : 'none';
