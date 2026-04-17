@@ -217,7 +217,9 @@ def timelapse_start():
         name = str(data.get("name", "timelapse"))[:64].strip() or "timelapse"
         interval_sec = max(1, int(data.get("interval_sec", 30)))
         segment_hours = max(0.1, float(data.get("segment_hours", 2.0)))
-        result = tl.start(name, interval_sec, segment_hours)
+        skip_dark = bool(data.get("skip_dark", True))
+        dark_threshold = max(0, min(255, int(data.get("dark_threshold", 30))))
+        result = tl.start(name, interval_sec, segment_hours, skip_dark, dark_threshold)
         return jsonify(result)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 409

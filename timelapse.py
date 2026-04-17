@@ -1,3 +1,4 @@
+import io
 import json
 import re
 import shutil
@@ -9,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
+from PIL import Image, ImageStat
+
 
 @dataclass
 class TimelapseSession:
@@ -18,8 +21,11 @@ class TimelapseSession:
     segment_hours: float
     start_time: float
     frame_count: int = 0
+    skipped_dark: int = 0
     segment_index: int = 1       # segment currently being captured (1-based)
     segments_compiled: int = 0   # fully compiled segments on disk
+    skip_dark: bool = True
+    dark_threshold: int = 30     # avg pixel value 0-255; frames below this are skipped
     status: str = "running"      # running | compiling | done | error
     end_time: Optional[float] = None
     error: Optional[str] = None
@@ -73,7 +79,8 @@ class TimelapseManager:
         with self._lock:
             return self._session is not None and self._session.status == "running"
 
-    def start(self, name: str, interval_sec: int, segment_hours: float = 2.0) -> dict:
+    def start(self, name: str, interval_sec: int, segment_hours: float = 2.0,
+              skip_dark: bool = True, dark_threshold: int = 30) -> dict:
         with self._lock:
             if self._session is not None and self._session.status == "running":
                 raise ValueError("A timelapse is already running")
@@ -89,6 +96,8 @@ class TimelapseManager:
                 name=name,
                 interval_sec=interval_sec,
                 segment_hours=segment_hours,
+                skip_dark=skip_dark,
+                dark_threshold=dark_threshold,
                 start_time=time.time(),
             )
             self._write_meta(session_dir, self._session)
@@ -150,6 +159,9 @@ class TimelapseManager:
                 "segment_hours": s.segment_hours,
                 "segment_index": s.segment_index,
                 "segments_compiled": s.segments_compiled,
+                "skip_dark": s.skip_dark,
+                "dark_threshold": s.dark_threshold,
+                "skipped_dark": s.skipped_dark,
             }
 
     def list_timelapses(self) -> list:
@@ -221,6 +233,8 @@ class TimelapseManager:
             interval = self._session.interval_sec
             segment_secs = self._session.segment_hours * 3600
             seg_idx = self._session.segment_index
+            skip_dark = self._session.skip_dark
+            dark_threshold = self._session.dark_threshold
 
         seg_frame_count = initial_seg_frames
         seg_start = time.time()
@@ -228,14 +242,19 @@ class TimelapseManager:
         while not self._stop_event.is_set():
             frame = self._get_frame()
             if frame:
-                seg_frame_count += 1
-                seg_frames_dir = session_dir / f"seg_{seg_idx:03d}" / "frames"
-                (seg_frames_dir / f"frame_{seg_frame_count:05d}.jpg").write_bytes(frame)
-                with self._lock:
-                    if self._session:
-                        self._session.frame_count += 1
-                        if self._session.frame_count % 30 == 0:
-                            self._write_meta(session_dir, self._session)
+                if skip_dark and _avg_brightness(frame) < dark_threshold:
+                    with self._lock:
+                        if self._session:
+                            self._session.skipped_dark += 1
+                else:
+                    seg_frame_count += 1
+                    seg_frames_dir = session_dir / f"seg_{seg_idx:03d}" / "frames"
+                    (seg_frames_dir / f"frame_{seg_frame_count:05d}.jpg").write_bytes(frame)
+                    with self._lock:
+                        if self._session:
+                            self._session.frame_count += 1
+                            if self._session.frame_count % 30 == 0:
+                                self._write_meta(session_dir, self._session)
 
             if time.time() - seg_start >= segment_secs:
                 seg_idx, seg_frame_count = self._rotate_segment(session_dir, seg_idx)
@@ -332,3 +351,8 @@ class TimelapseManager:
     @staticmethod
     def _write_meta(session_dir: Path, session: "TimelapseSession"):
         (session_dir / "meta.json").write_text(json.dumps(asdict(session), indent=2))
+
+
+def _avg_brightness(jpeg_bytes: bytes) -> float:
+    img = Image.open(io.BytesIO(jpeg_bytes)).convert("L")
+    return ImageStat.Stat(img).mean[0]

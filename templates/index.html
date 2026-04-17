@@ -392,6 +392,13 @@
         </div>
       </div>
 
+      <div class="field" style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+        <input type="checkbox" id="tl-skip-dark" checked style="accent-color:var(--green); width:14px; height:14px; cursor:pointer;">
+        <label for="tl-skip-dark" style="margin:0; cursor:pointer; font-size:13px; color:var(--text)">
+          Skip dark frames <span style="color:var(--muted)">(threshold <input type="number" id="tl-dark-threshold" value="30" min="1" max="255" style="width:46px; padding:2px 4px; font-size:12px; background:var(--card2); border:1px solid var(--border); border-radius:4px; color:var(--text); text-align:center;">)</span>
+        </label>
+      </div>
+
       <div class="error-msg" id="start-error"></div>
       <button class="btn btn-green" id="btn-start" onclick="startTimelapse()">
         &#9654; Start Timelapse
@@ -423,6 +430,10 @@
       <div class="status-row">
         <span class="label">Checkpoints</span>
         <span class="value" id="st-segments">—</span>
+      </div>
+      <div class="status-row" id="st-dark-row" style="display:none">
+        <span class="label">Dark skipped</span>
+        <span class="value" id="st-dark">0</span>
       </div>
       <br>
       <button class="btn btn-ghost" id="btn-watch-progress" onclick="watchProgress()"
@@ -582,6 +593,8 @@ async function startTimelapse() {
   const name = document.getElementById('tl-name').value.trim() || 'timelapse';
   const interval = parseInt(document.getElementById('tl-interval').value, 10) || 30;
   const segmentHours = parseFloat(document.getElementById('tl-segment-hours').value) || 2.0;
+  const skipDark = document.getElementById('tl-skip-dark').checked;
+  const darkThreshold = parseInt(document.getElementById('tl-dark-threshold').value, 10) || 30;
   const errEl = document.getElementById('start-error');
   errEl.style.display = 'none';
 
@@ -590,7 +603,7 @@ async function startTimelapse() {
     const r = await fetch('/api/timelapse/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, interval_sec: interval, segment_hours: segmentHours }),
+      body: JSON.stringify({ name, interval_sec: interval, segment_hours: segmentHours, skip_dark: skipDark, dark_threshold: darkThreshold }),
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Failed to start');
@@ -653,6 +666,14 @@ async function fetchTlStatus() {
     const segIdx = d.segment_index ?? 1;
     document.getElementById('st-segments').textContent =
       `${segsCompiled} compiled, capturing seg ${segIdx}`;
+
+    const darkRow = document.getElementById('st-dark-row');
+    if (d.skip_dark) {
+      darkRow.style.display = '';
+      document.getElementById('st-dark').textContent = d.skipped_dark ?? 0;
+    } else {
+      darkRow.style.display = 'none';
+    }
 
     const watchBtn = document.getElementById('btn-watch-progress');
     watchBtn.style.display = (d.active && segsCompiled > 0) ? 'block' : 'none';
