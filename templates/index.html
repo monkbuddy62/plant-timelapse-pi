@@ -693,7 +693,7 @@ async function startTimelapse() {
         skip_dark: skipDark, dark_threshold: darkThreshold,
         daylight_only: daylightOnly, latitude, longitude,
         sunrise_offset_min: sunriseOffsetMin, sunset_offset_min: sunsetOffsetMin,
-        tz_offset_min: tzOffsetMin,
+        tz_offset_min: tzOffsetMin, client_ts: Date.now() / 1000,
       }),
     });
     const d = await r.json();

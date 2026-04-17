@@ -15,7 +15,7 @@ from timelapse import TimelapseManager
 
 app = Flask(__name__)
 
-BUILD_ID = "6"
+BUILD_ID = "7"
 
 TIMELAPSES_DIR = Path(os.environ.get("TIMELAPSES_DIR", Path(__file__).parent / "timelapses"))
 TIMELAPSES_DIR.mkdir(exist_ok=True)
@@ -230,12 +230,13 @@ def timelapse_start():
         sunrise_offset_min = int(data.get("sunrise_offset_min", 0))
         sunset_offset_min = int(data.get("sunset_offset_min", 0))
         tz_offset_min = int(data.get("tz_offset_min", 0))
+        client_ts = float(data.get("client_ts", 0) or 0)
         result = tl.start(
             name, interval_sec, segment_hours,
             skip_dark, dark_threshold,
             daylight_only, latitude, longitude,
             sunrise_offset_min, sunset_offset_min,
-            tz_offset_min,
+            tz_offset_min, client_ts,
         )
         return jsonify(result)
     except ValueError as exc:

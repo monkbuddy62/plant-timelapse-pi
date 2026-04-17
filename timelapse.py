@@ -126,7 +126,10 @@ class TimelapseManager:
               skip_dark: bool = True, dark_threshold: int = 30,
               daylight_only: bool = False, latitude: float = 0.0, longitude: float = 0.0,
               sunrise_offset_min: int = 0, sunset_offset_min: int = 0,
-              tz_offset_min: int = 0) -> dict:
+              tz_offset_min: int = 0, client_ts: float = 0.0) -> dict:
+        if client_ts:
+            self._clock_offset_sec = client_ts - time.time()
+
         with self._lock:
             if self._session is not None and self._session.status == "running":
                 raise ValueError("A timelapse is already running")
@@ -346,7 +349,7 @@ class TimelapseManager:
                         # If astral fails, skip the window check and capture anyway
                         _dl_start = _dl_end = None
                 if _dl_start and _dl_end and not (_dl_start <= self._corrected_utc_now() <= _dl_end):
-                    self._stop_event.wait(timeout=60)
+                    self._stop_event.wait(timeout=5)
                     continue
 
             frame = self._get_frame()
