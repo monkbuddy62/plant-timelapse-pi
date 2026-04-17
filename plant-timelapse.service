@@ -3,7 +3,7 @@ Description=Plant Timelapse Monitor
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/python3 __INSTALL_DIR__/app.py
+ExecStart=__INSTALL_DIR__/venv/bin/python __INSTALL_DIR__/app.py
 WorkingDirectory=__INSTALL_DIR__
 User=__USER__
 Restart=always
