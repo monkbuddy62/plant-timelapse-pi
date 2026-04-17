@@ -2,7 +2,7 @@
 set -e
 
 REPO="https://github.com/monkbuddy62/plant-timelapse-pi.git"
-REAL_USER="${SUDO_USER:-$USER}"
+REAL_USER="$(logname 2>/dev/null || echo "${SUDO_USER:-$USER}")"
 INSTALL_DIR="/home/$REAL_USER/plant-timelapse"
 
 echo "Cloning plant-timelapse-pi into $INSTALL_DIR..."
