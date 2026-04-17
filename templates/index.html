@@ -670,6 +670,7 @@ async function startTimelapse() {
   const longitude = parseFloat(document.getElementById('tl-lon').value) || 0;
   const sunriseOffsetMin = parseInt(document.getElementById('tl-rise-offset').value, 10) || 0;
   const sunsetOffsetMin = parseInt(document.getElementById('tl-set-offset').value, 10) || 0;
+  const tzOffsetMin = -new Date().getTimezoneOffset(); // e.g. -420 for PDT (UTC-7)
 
   if (daylightOnly && (!latitude && !longitude)) {
     const errEl = document.getElementById('start-error');
@@ -692,6 +693,7 @@ async function startTimelapse() {
         skip_dark: skipDark, dark_threshold: darkThreshold,
         daylight_only: daylightOnly, latitude, longitude,
         sunrise_offset_min: sunriseOffsetMin, sunset_offset_min: sunsetOffsetMin,
+        tz_offset_min: tzOffsetMin,
       }),
     });
     const d = await r.json();

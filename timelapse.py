@@ -33,6 +33,7 @@ class TimelapseSession:
     longitude: float = 0.0
     sunrise_offset_min: int = 0  # minutes after sunrise to start capturing
     sunset_offset_min: int = 0   # minutes before sunset to stop capturing
+    tz_offset_min: int = 0       # browser UTC offset at start (e.g. -420 for PDT); used so daylight window uses user's local date, not Pi's system date
     status: str = "running"      # running | compiling | done | error
     end_time: Optional[float] = None
     error: Optional[str] = None
@@ -116,7 +117,8 @@ class TimelapseManager:
     def start(self, name: str, interval_sec: int, segment_hours: float = 2.0,
               skip_dark: bool = True, dark_threshold: int = 30,
               daylight_only: bool = False, latitude: float = 0.0, longitude: float = 0.0,
-              sunrise_offset_min: int = 0, sunset_offset_min: int = 0) -> dict:
+              sunrise_offset_min: int = 0, sunset_offset_min: int = 0,
+              tz_offset_min: int = 0) -> dict:
         with self._lock:
             if self._session is not None and self._session.status == "running":
                 raise ValueError("A timelapse is already running")
@@ -139,6 +141,7 @@ class TimelapseManager:
                 longitude=longitude,
                 sunrise_offset_min=sunrise_offset_min,
                 sunset_offset_min=sunset_offset_min,
+                tz_offset_min=tz_offset_min,
                 start_time=time.time(),
             )
             self._write_meta(session_dir, self._session)
@@ -208,6 +211,7 @@ class TimelapseManager:
                 "longitude": s.longitude,
                 "sunrise_offset_min": s.sunrise_offset_min,
                 "sunset_offset_min": s.sunset_offset_min,
+                "tz_offset_min": s.tz_offset_min,
                 "capture_alive": self._thread is not None and self._thread.is_alive(),
             }
 
@@ -218,6 +222,7 @@ class TimelapseManager:
                 dl_start, dl_end = _daylight_window(
                     result["latitude"], result["longitude"],
                     result["sunrise_offset_min"], result["sunset_offset_min"],
+                    result["tz_offset_min"],
                 )
                 now_utc = datetime.now(timezone.utc)
                 result["daylight_paused"] = not (dl_start <= now_utc <= dl_end)
@@ -304,6 +309,7 @@ class TimelapseManager:
             longitude = self._session.longitude
             sunrise_offset_min = self._session.sunrise_offset_min
             sunset_offset_min = self._session.sunset_offset_min
+            tz_offset_min = self._session.tz_offset_min
 
         seg_frame_count = initial_seg_frames
         seg_start = time.time()
@@ -312,13 +318,15 @@ class TimelapseManager:
         _dl_end: Optional[datetime] = None
 
         while not self._stop_event.is_set():
-            # Daylight window check — recalculate once per day
+            # Daylight window check — recalculate once per day (keyed on user's local date)
             if daylight_only:
-                today = date.today()
+                user_tz = timezone(timedelta(minutes=tz_offset_min))
+                today = datetime.now(user_tz).date()
                 if today != _dl_date:
                     try:
                         _dl_start, _dl_end = _daylight_window(
-                            latitude, longitude, sunrise_offset_min, sunset_offset_min
+                            latitude, longitude, sunrise_offset_min, sunset_offset_min,
+                            tz_offset_min,
                         )
                         _dl_date = today
                     except Exception:
@@ -446,10 +454,18 @@ def _avg_brightness(jpeg_bytes: bytes) -> float:
     return ImageStat.Stat(img).mean[0]
 
 
-def _daylight_window(lat: float, lon: float, rise_offset_min: int, set_offset_min: int):
-    """Return (start_utc, end_utc) for today's capture window."""
+def _daylight_window(lat: float, lon: float, rise_offset_min: int, set_offset_min: int,
+                     tz_offset_min: int = 0):
+    """Return (start_utc, end_utc) for today's capture window.
+
+    Uses tz_offset_min (browser UTC offset, e.g. -420 for PDT) to derive
+    the user's local calendar date. This makes the window correct regardless
+    of what timezone the Pi's OS is set to.
+    """
+    user_tz = timezone(timedelta(minutes=tz_offset_min))
+    local_date = datetime.now(user_tz).date()
     loc = LocationInfo(latitude=lat, longitude=lon)
-    s = astral_sun(loc.observer, date=date.today())
+    s = astral_sun(loc.observer, date=local_date)
     start = s["sunrise"] + timedelta(minutes=rise_offset_min)
     end = s["sunset"] - timedelta(minutes=set_offset_min)
     return start, end
