@@ -354,6 +354,7 @@
   <div class="dot" id="cam-dot"></div>
   <h1>Plant Monitor</h1>
   <span id="cam-label">connecting…</span>
+  <span style="margin-left:auto; font-size:11px; color:var(--muted)" id="build-label">build –</span>
 </header>
 
 <div class="main-grid">
@@ -1120,6 +1121,15 @@ async function clearSchedule() {
   const pad = n => String(n).padStart(2, '0');
   document.getElementById('sched-start').value =
     `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+})();
+
+// ── Build ID ──────────────────────────────────────────────────────────────────
+(async () => {
+  try {
+    const r = await fetch('/api/debug/daylight');
+    const d = await r.json();
+    document.getElementById('build-label').textContent = 'build ' + (d.build_id || '?');
+  } catch (_) {}
 })();
 
 // ── Polling ───────────────────────────────────────────────────────────────────

@@ -15,7 +15,7 @@ from timelapse import TimelapseManager
 
 app = Flask(__name__)
 
-BUILD_ID = "7"
+BUILD_ID = "8"
 
 TIMELAPSES_DIR = Path(os.environ.get("TIMELAPSES_DIR", Path(__file__).parent / "timelapses"))
 TIMELAPSES_DIR.mkdir(exist_ok=True)
@@ -256,6 +256,42 @@ def timelapse_stop():
 def timelapse_status():
     client_ts = float(request.args.get("ts", 0) or 0)
     return jsonify(tl.status(client_ts=client_ts))
+
+
+@app.route("/api/debug/daylight")
+def debug_daylight():
+    from datetime import timezone as _tz, timedelta as _td
+    from timelapse import _daylight_window
+    import traceback
+    out = {
+        "build_id": BUILD_ID,
+        "pi_time_utc": datetime.now(_tz.utc).isoformat(),
+        "pi_unix": time.time(),
+        "clock_offset_sec": tl._clock_offset_sec,
+        "corrected_time_utc": tl._corrected_utc_now().isoformat(),
+    }
+    s = tl.status()
+    out["session"] = {k: s.get(k) for k in (
+        "active", "status", "daylight_only", "daylight_paused",
+        "daylight_resume_ts", "daylight_pause_ts", "daylight_error",
+        "latitude", "longitude", "sunrise_offset_min", "sunset_offset_min",
+        "tz_offset_min", "capture_alive",
+    )}
+    if s.get("daylight_only") and s.get("latitude") is not None:
+        try:
+            dl_start, dl_end = _daylight_window(
+                s["latitude"], s["longitude"],
+                s["sunrise_offset_min"], s["sunset_offset_min"],
+                s.get("tz_offset_min", 0),
+            )
+            out["window_start_utc"] = dl_start.isoformat()
+            out["window_end_utc"] = dl_end.isoformat()
+            out["window_start_unix"] = dl_start.timestamp()
+            out["window_end_unix"] = dl_end.timestamp()
+            out["in_window"] = (dl_start <= tl._corrected_utc_now() <= dl_end)
+        except Exception:
+            out["window_error"] = traceback.format_exc()
+    return jsonify(out)
 
 
 @app.route("/api/timelapses")
