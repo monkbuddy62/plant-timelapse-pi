@@ -219,7 +219,17 @@ def timelapse_start():
         segment_hours = max(0.1, float(data.get("segment_hours", 2.0)))
         skip_dark = bool(data.get("skip_dark", True))
         dark_threshold = max(0, min(255, int(data.get("dark_threshold", 30))))
-        result = tl.start(name, interval_sec, segment_hours, skip_dark, dark_threshold)
+        daylight_only = bool(data.get("daylight_only", False))
+        latitude = float(data.get("latitude", 0.0))
+        longitude = float(data.get("longitude", 0.0))
+        sunrise_offset_min = int(data.get("sunrise_offset_min", 0))
+        sunset_offset_min = int(data.get("sunset_offset_min", 0))
+        result = tl.start(
+            name, interval_sec, segment_hours,
+            skip_dark, dark_threshold,
+            daylight_only, latitude, longitude,
+            sunrise_offset_min, sunset_offset_min,
+        )
         return jsonify(result)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 409

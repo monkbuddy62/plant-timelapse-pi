@@ -6,10 +6,12 @@ import subprocess
 import threading
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
+from astral import LocationInfo
+from astral.sun import sun as astral_sun
 from PIL import Image, ImageStat
 
 
@@ -26,6 +28,11 @@ class TimelapseSession:
     segments_compiled: int = 0   # fully compiled segments on disk
     skip_dark: bool = True
     dark_threshold: int = 30     # avg pixel value 0-255; frames below this are skipped
+    daylight_only: bool = False
+    latitude: float = 0.0
+    longitude: float = 0.0
+    sunrise_offset_min: int = 0  # minutes after sunrise to start capturing
+    sunset_offset_min: int = 0   # minutes before sunset to stop capturing
     status: str = "running"      # running | compiling | done | error
     end_time: Optional[float] = None
     error: Optional[str] = None
@@ -80,7 +87,9 @@ class TimelapseManager:
             return self._session is not None and self._session.status == "running"
 
     def start(self, name: str, interval_sec: int, segment_hours: float = 2.0,
-              skip_dark: bool = True, dark_threshold: int = 30) -> dict:
+              skip_dark: bool = True, dark_threshold: int = 30,
+              daylight_only: bool = False, latitude: float = 0.0, longitude: float = 0.0,
+              sunrise_offset_min: int = 0, sunset_offset_min: int = 0) -> dict:
         with self._lock:
             if self._session is not None and self._session.status == "running":
                 raise ValueError("A timelapse is already running")
@@ -98,6 +107,11 @@ class TimelapseManager:
                 segment_hours=segment_hours,
                 skip_dark=skip_dark,
                 dark_threshold=dark_threshold,
+                daylight_only=daylight_only,
+                latitude=latitude,
+                longitude=longitude,
+                sunrise_offset_min=sunrise_offset_min,
+                sunset_offset_min=sunset_offset_min,
                 start_time=time.time(),
             )
             self._write_meta(session_dir, self._session)
@@ -162,6 +176,11 @@ class TimelapseManager:
                 "skip_dark": s.skip_dark,
                 "dark_threshold": s.dark_threshold,
                 "skipped_dark": s.skipped_dark,
+                "daylight_only": s.daylight_only,
+                "latitude": s.latitude,
+                "longitude": s.longitude,
+                "sunrise_offset_min": s.sunrise_offset_min,
+                "sunset_offset_min": s.sunset_offset_min,
             }
 
     def list_timelapses(self) -> list:
@@ -235,11 +254,31 @@ class TimelapseManager:
             seg_idx = self._session.segment_index
             skip_dark = self._session.skip_dark
             dark_threshold = self._session.dark_threshold
+            daylight_only = self._session.daylight_only
+            latitude = self._session.latitude
+            longitude = self._session.longitude
+            sunrise_offset_min = self._session.sunrise_offset_min
+            sunset_offset_min = self._session.sunset_offset_min
 
         seg_frame_count = initial_seg_frames
         seg_start = time.time()
+        _dl_date: Optional[date] = None
+        _dl_start: Optional[datetime] = None
+        _dl_end: Optional[datetime] = None
 
         while not self._stop_event.is_set():
+            # Daylight window check — recalculate once per day
+            if daylight_only:
+                today = date.today()
+                if today != _dl_date:
+                    _dl_start, _dl_end = _daylight_window(
+                        latitude, longitude, sunrise_offset_min, sunset_offset_min
+                    )
+                    _dl_date = today
+                if not (_dl_start <= datetime.now(timezone.utc) <= _dl_end):
+                    self._stop_event.wait(timeout=60)
+                    continue
+
             frame = self._get_frame()
             if frame:
                 if skip_dark and _avg_brightness(frame) < dark_threshold:
@@ -356,3 +395,12 @@ class TimelapseManager:
 def _avg_brightness(jpeg_bytes: bytes) -> float:
     img = Image.open(io.BytesIO(jpeg_bytes)).convert("L")
     return ImageStat.Stat(img).mean[0]
+
+
+def _daylight_window(lat: float, lon: float, rise_offset_min: int, set_offset_min: int):
+    """Return (start_utc, end_utc) for today's capture window."""
+    loc = LocationInfo(latitude=lat, longitude=lon)
+    s = astral_sun(loc.observer, date=date.today())
+    start = s["sunrise"] + timedelta(minutes=rise_offset_min)
+    end = s["sunset"] - timedelta(minutes=set_offset_min)
+    return start, end

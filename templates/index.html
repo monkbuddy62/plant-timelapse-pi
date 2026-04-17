@@ -399,6 +399,46 @@
         </label>
       </div>
 
+      <div class="field" style="margin-bottom:4px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <input type="checkbox" id="tl-daylight-only" style="accent-color:var(--green); width:14px; height:14px; cursor:pointer;" onchange="toggleDaylightFields()">
+          <label for="tl-daylight-only" style="margin:0; cursor:pointer; font-size:13px; color:var(--text)">Capture during daylight window only</label>
+        </div>
+      </div>
+      <div id="daylight-fields" style="display:none; background:var(--card2); border:1px solid var(--border); border-radius:6px; padding:12px; margin-bottom:12px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px;">
+          <div>
+            <label style="display:block; font-size:11px; color:var(--muted); margin-bottom:3px;">Latitude</label>
+            <input type="number" id="tl-lat" step="0.0001" placeholder="e.g. 47.6062"
+              style="width:100%; background:var(--card); border:1px solid var(--border); color:var(--text); border-radius:4px; padding:5px 8px; font-size:13px;">
+          </div>
+          <div>
+            <label style="display:block; font-size:11px; color:var(--muted); margin-bottom:3px;">Longitude</label>
+            <input type="number" id="tl-lon" step="0.0001" placeholder="e.g. -122.3321"
+              style="width:100%; background:var(--card); border:1px solid var(--border); color:var(--text); border-radius:4px; padding:5px 8px; font-size:13px;">
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <div>
+            <label style="display:block; font-size:11px; color:var(--muted); margin-bottom:3px;">Start after sunrise</label>
+            <div style="display:flex; align-items:center; gap:4px;">
+              <input type="number" id="tl-rise-offset" value="0" min="0" max="360"
+                style="width:60px; background:var(--card); border:1px solid var(--border); color:var(--text); border-radius:4px; padding:5px 8px; font-size:13px;">
+              <span style="font-size:12px; color:var(--muted)">min</span>
+            </div>
+          </div>
+          <div>
+            <label style="display:block; font-size:11px; color:var(--muted); margin-bottom:3px;">Stop before sunset</label>
+            <div style="display:flex; align-items:center; gap:4px;">
+              <input type="number" id="tl-set-offset" value="0" min="0" max="360"
+                style="width:60px; background:var(--card); border:1px solid var(--border); color:var(--text); border-radius:4px; padding:5px 8px; font-size:13px;">
+              <span style="font-size:12px; color:var(--muted)">min</span>
+            </div>
+          </div>
+        </div>
+        <div id="daylight-preview" style="margin-top:10px; font-size:11px; color:var(--muted);"></div>
+      </div>
+
       <div class="error-msg" id="start-error"></div>
       <button class="btn btn-green" id="btn-start" onclick="startTimelapse()">
         &#9654; Start Timelapse
@@ -434,6 +474,10 @@
       <div class="status-row" id="st-dark-row" style="display:none">
         <span class="label">Dark skipped</span>
         <span class="value" id="st-dark">0</span>
+      </div>
+      <div class="status-row" id="st-daylight-row" style="display:none">
+        <span class="label">Daylight window</span>
+        <span class="value" id="st-daylight">—</span>
       </div>
       <br>
       <button class="btn btn-ghost" id="btn-watch-progress" onclick="watchProgress()"
@@ -548,6 +592,27 @@
 </div>
 
 <script>
+// ── Daylight mode ────────────────────────────────────────────────────────────
+function toggleDaylightFields() {
+  const on = document.getElementById('tl-daylight-only').checked;
+  document.getElementById('daylight-fields').style.display = on ? 'block' : 'none';
+  if (on) loadSavedLocation();
+}
+
+function loadSavedLocation() {
+  const lat = localStorage.getItem('tl_lat');
+  const lon = localStorage.getItem('tl_lon');
+  if (lat) document.getElementById('tl-lat').value = lat;
+  if (lon) document.getElementById('tl-lon').value = lon;
+}
+
+function saveLocation() {
+  const lat = document.getElementById('tl-lat').value;
+  const lon = document.getElementById('tl-lon').value;
+  if (lat) localStorage.setItem('tl_lat', lat);
+  if (lon) localStorage.setItem('tl_lon', lon);
+}
+
 // ── Stream ────────────────────────────────────────────────────────────────────
 let streamReady = false;
 
@@ -595,6 +660,20 @@ async function startTimelapse() {
   const segmentHours = parseFloat(document.getElementById('tl-segment-hours').value) || 2.0;
   const skipDark = document.getElementById('tl-skip-dark').checked;
   const darkThreshold = parseInt(document.getElementById('tl-dark-threshold').value, 10) || 30;
+  const daylightOnly = document.getElementById('tl-daylight-only').checked;
+  const latitude = parseFloat(document.getElementById('tl-lat').value) || 0;
+  const longitude = parseFloat(document.getElementById('tl-lon').value) || 0;
+  const sunriseOffsetMin = parseInt(document.getElementById('tl-rise-offset').value, 10) || 0;
+  const sunsetOffsetMin = parseInt(document.getElementById('tl-set-offset').value, 10) || 0;
+
+  if (daylightOnly && (!latitude && !longitude)) {
+    const errEl = document.getElementById('start-error');
+    errEl.textContent = 'Enter latitude and longitude for daylight mode';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (daylightOnly) saveLocation();
+
   const errEl = document.getElementById('start-error');
   errEl.style.display = 'none';
 
@@ -603,7 +682,12 @@ async function startTimelapse() {
     const r = await fetch('/api/timelapse/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, interval_sec: interval, segment_hours: segmentHours, skip_dark: skipDark, dark_threshold: darkThreshold }),
+      body: JSON.stringify({
+        name, interval_sec: interval, segment_hours: segmentHours,
+        skip_dark: skipDark, dark_threshold: darkThreshold,
+        daylight_only: daylightOnly, latitude, longitude,
+        sunrise_offset_min: sunriseOffsetMin, sunset_offset_min: sunsetOffsetMin,
+      }),
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Failed to start');
@@ -673,6 +757,17 @@ async function fetchTlStatus() {
       document.getElementById('st-dark').textContent = d.skipped_dark ?? 0;
     } else {
       darkRow.style.display = 'none';
+    }
+
+    const dlRow = document.getElementById('st-daylight-row');
+    if (d.daylight_only) {
+      dlRow.style.display = '';
+      const riseOff = d.sunrise_offset_min ? `+${d.sunrise_offset_min}m` : '';
+      const setOff  = d.sunset_offset_min  ? `-${d.sunset_offset_min}m`  : '';
+      document.getElementById('st-daylight').textContent =
+        `sunrise${riseOff} → sunset${setOff}`;
+    } else {
+      dlRow.style.display = 'none';
     }
 
     const watchBtn = document.getElementById('btn-watch-progress');
