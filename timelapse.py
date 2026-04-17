@@ -50,6 +50,33 @@ class TimelapseManager:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
+    def revive_dead_thread(self) -> bool:
+        """Restart the capture thread if it died while the session is still 'running'.
+        Called periodically by the scheduler as a watchdog."""
+        with self._lock:
+            if self._session is None or self._session.status != "running":
+                return False
+            if self._stop_event.is_set():
+                return False  # stop() is in progress — don't fight it
+            if self._thread is not None and self._thread.is_alive():
+                return False
+            session = self._session
+            session_dir = self.base_dir / session.id
+
+        seg_frames_dir = session_dir / f"seg_{session.segment_index:03d}" / "frames"
+        seg_frames_dir.mkdir(parents=True, exist_ok=True)
+        seg_frame_count = len(list(seg_frames_dir.glob("frame_*.jpg")))
+
+        self._stop_event.clear()
+        self._thread = threading.Thread(
+            target=self._capture_loop,
+            args=(session_dir, seg_frame_count),
+            daemon=True,
+            name=f"timelapse-{session.id}-revived",
+        )
+        self._thread.start()
+        return True
+
     def resume_interrupted(self) -> Optional[str]:
         """On startup, find any session left in 'running' state and resume it."""
         for meta_file in self.base_dir.glob("*/meta.json"):

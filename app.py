@@ -15,7 +15,7 @@ from timelapse import TimelapseManager
 
 app = Flask(__name__)
 
-BUILD_ID = "3"
+BUILD_ID = "4"
 
 TIMELAPSES_DIR = Path(os.environ.get("TIMELAPSES_DIR", Path(__file__).parent / "timelapses"))
 TIMELAPSES_DIR.mkdir(exist_ok=True)
@@ -163,6 +163,9 @@ def _scheduler_loop():
             with _schedule_lock:
                 if _schedule is sched:
                     _schedule = None
+
+        if tl.revive_dead_thread():
+            app.logger.warning("Capture thread was dead; restarted automatically")
 
         _sched_stop.wait(timeout=30)
 
