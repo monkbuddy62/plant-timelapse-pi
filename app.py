@@ -216,7 +216,8 @@ def timelapse_start():
     try:
         name = str(data.get("name", "timelapse"))[:64].strip() or "timelapse"
         interval_sec = max(1, int(data.get("interval_sec", 30)))
-        result = tl.start(name, interval_sec)
+        segment_hours = max(0.1, float(data.get("segment_hours", 2.0)))
+        result = tl.start(name, interval_sec, segment_hours)
         return jsonify(result)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 409
@@ -251,10 +252,23 @@ def timelapse_video(tl_id: str):
 
 @app.route("/api/timelapses/<tl_id>/thumbnail")
 def timelapse_thumbnail(tl_id: str):
-    path = TIMELAPSES_DIR / _safe_id(tl_id) / "frames" / "frame_00001.jpg"
-    if not path.exists():
-        return jsonify({"error": "Thumbnail not found"}), 404
-    return send_file(path, mimetype="image/jpeg")
+    tl_dir = TIMELAPSES_DIR / _safe_id(tl_id)
+    # Support new seg_001/frames/ layout and legacy frames/ layout
+    for candidate in [
+        tl_dir / "seg_001" / "frames" / "frame_00001.jpg",
+        tl_dir / "frames" / "frame_00001.jpg",
+    ]:
+        if candidate.exists():
+            return send_file(candidate, mimetype="image/jpeg")
+    return jsonify({"error": "Thumbnail not found"}), 404
+
+
+@app.route("/api/timelapses/<tl_id>/preview")
+def timelapse_preview(tl_id: str):
+    path = tl.build_preview(_safe_id(tl_id))
+    if path is None:
+        return jsonify({"error": "No compiled segments available yet"}), 404
+    return send_file(path, mimetype="video/mp4", conditional=True)
 
 
 @app.route("/api/timelapses/<tl_id>", methods=["DELETE"])
@@ -342,6 +356,9 @@ def clear_schedule():
 
 if __name__ == "__main__":
     start_camera()
+    resumed = tl.resume_interrupted()
+    if resumed:
+        app.logger.info("Resumed interrupted timelapse: %s", resumed)
     sched_thread = threading.Thread(target=_scheduler_loop, daemon=True, name="scheduler")
     sched_thread.start()
     app.run(host="0.0.0.0", port=5000, threaded=True, use_reloader=False)

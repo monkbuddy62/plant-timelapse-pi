@@ -384,6 +384,14 @@
         </div>
       </div>
 
+      <div class="field">
+        <label>Checkpoint every</label>
+        <div class="interval-row">
+          <input id="tl-segment-hours" type="number" min="0.1" max="24" step="0.5" value="2">
+          <span>hours</span>
+        </div>
+      </div>
+
       <div class="error-msg" id="start-error"></div>
       <button class="btn btn-green" id="btn-start" onclick="startTimelapse()">
         &#9654; Start Timelapse
@@ -412,7 +420,15 @@
         <span class="label">Interval</span>
         <span class="value" id="st-interval">—</span>
       </div>
+      <div class="status-row">
+        <span class="label">Checkpoints</span>
+        <span class="value" id="st-segments">—</span>
+      </div>
       <br>
+      <button class="btn btn-ghost" id="btn-watch-progress" onclick="watchProgress()"
+              style="margin-bottom:8px; display:none">
+        &#9654; Watch so far
+      </button>
       <button class="btn btn-red" id="btn-stop" onclick="stopTimelapse()">
         &#9632; Stop &amp; Compile
       </button>
@@ -565,6 +581,7 @@ let tlActive = false;
 async function startTimelapse() {
   const name = document.getElementById('tl-name').value.trim() || 'timelapse';
   const interval = parseInt(document.getElementById('tl-interval').value, 10) || 30;
+  const segmentHours = parseFloat(document.getElementById('tl-segment-hours').value) || 2.0;
   const errEl = document.getElementById('start-error');
   errEl.style.display = 'none';
 
@@ -573,7 +590,7 @@ async function startTimelapse() {
     const r = await fetch('/api/timelapse/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, interval_sec: interval }),
+      body: JSON.stringify({ name, interval_sec: interval, segment_hours: segmentHours }),
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Failed to start');
@@ -631,6 +648,16 @@ async function fetchTlStatus() {
     document.getElementById('st-elapsed').textContent = fmtElapsed(d.elapsed_sec || 0);
     document.getElementById('st-interval').textContent =
       d.interval_sec ? `every ${d.interval_sec}s` : '—';
+
+    const segsCompiled = d.segments_compiled ?? 0;
+    const segIdx = d.segment_index ?? 1;
+    document.getElementById('st-segments').textContent =
+      `${segsCompiled} compiled, capturing seg ${segIdx}`;
+
+    const watchBtn = document.getElementById('btn-watch-progress');
+    watchBtn.style.display = (d.active && segsCompiled > 0) ? 'block' : 'none';
+    watchBtn.dataset.id = d.id;
+    watchBtn.dataset.name = d.name;
 
     const badge = document.getElementById('st-badge');
     const statusMap = {
@@ -696,11 +723,12 @@ function renderTimelapses(list) {
     }
 
     const canPlay = t.has_video;
+    const canPreview = t.can_preview && !t.has_video;
     const canDownload = t.has_video;
 
     return `
       <div class="tl-card">
-        <div class="tl-thumb" ${canPlay ? `onclick="playVideo('${escAttr(t.id)}', '${escAttr(t.name)}')"` : ''}>
+        <div class="tl-thumb" ${canPlay ? `onclick="playVideo('${escAttr(t.id)}', '${escAttr(t.name)}')"` : canPreview ? `onclick="watchProgress('${escAttr(t.id)}', '${escAttr(t.name)}')"` : ''}>
           ${thumbHtml}
         </div>
         <div class="tl-info">
@@ -709,8 +737,12 @@ function renderTimelapses(list) {
           <div class="tl-meta">${frames} frames · ${duration}</div>
         </div>
         <div class="tl-actions">
-          <button class="btn btn-ghost" onclick="playVideo('${escAttr(t.id)}', '${escAttr(t.name)}')"
-            ${canPlay ? '' : 'disabled'} title="Play">&#9654;</button>
+          ${canPlay
+            ? `<button class="btn btn-ghost" onclick="playVideo('${escAttr(t.id)}', '${escAttr(t.name)}')" title="Play">&#9654;</button>`
+            : canPreview
+            ? `<button class="btn btn-ghost" data-preview-id="${escAttr(t.id)}" onclick="watchProgress('${escAttr(t.id)}', '${escAttr(t.name)}')" title="Watch so far" style="flex:2">&#9654; Watch so far</button>`
+            : `<button class="btn btn-ghost" disabled title="Play">&#9654;</button>`
+          }
           <a href="/api/timelapses/${encodeURIComponent(t.id)}/video" download="${escAttr(t.name)}.mp4"
              style="flex:1; text-decoration:none;">
             <button class="btn btn-ghost" style="width:100%"
@@ -729,6 +761,35 @@ function playVideo(id, name) {
   document.getElementById('modal-title').textContent = name;
   document.getElementById('modal').classList.add('open');
   video.play().catch(() => {});
+}
+
+async function watchProgress(id, name) {
+  // Allow calling from button dataset (running status card) or directly
+  if (!id) {
+    const btn = document.getElementById('btn-watch-progress');
+    id = btn.dataset.id;
+    name = btn.dataset.name;
+  }
+  const btn = document.querySelector(`[data-preview-id="${CSS.escape(id)}"]`)
+           || document.getElementById('btn-watch-progress');
+  const origText = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Building…'; }
+
+  try {
+    const r = await fetch(`/api/timelapses/${encodeURIComponent(id)}/preview`);
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      alert(d.error || 'Preview not ready yet');
+      return;
+    }
+    const video = document.getElementById('modal-video');
+    video.src = `/api/timelapses/${encodeURIComponent(id)}/preview?t=${Date.now()}`;
+    document.getElementById('modal-title').textContent = `${name} (so far)`;
+    document.getElementById('modal').classList.add('open');
+    video.play().catch(() => {});
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = origText; }
+  }
 }
 
 function closeModal() {

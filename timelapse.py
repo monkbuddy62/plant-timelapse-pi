@@ -15,9 +15,12 @@ class TimelapseSession:
     id: str
     name: str
     interval_sec: int
+    segment_hours: float
     start_time: float
     frame_count: int = 0
-    status: str = "running"  # running | compiling | done | error
+    segment_index: int = 1       # segment currently being captured (1-based)
+    segments_compiled: int = 0   # fully compiled segments on disk
+    status: str = "running"      # running | compiling | done | error
     end_time: Optional[float] = None
     error: Optional[str] = None
 
@@ -30,13 +33,47 @@ class TimelapseManager:
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
+        self._seg_threads: list[threading.Thread] = []
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def resume_interrupted(self) -> Optional[str]:
+        """On startup, find any session left in 'running' state and resume it."""
+        for meta_file in self.base_dir.glob("*/meta.json"):
+            try:
+                data = json.loads(meta_file.read_text())
+                if data.get("status") != "running":
+                    continue
+                known = set(TimelapseSession.__dataclass_fields__)
+                session = TimelapseSession(**{k: v for k, v in data.items() if k in known})
+                session_dir = self.base_dir / session.id
+
+                seg_frames_dir = session_dir / f"seg_{session.segment_index:03d}" / "frames"
+                seg_frames_dir.mkdir(parents=True, exist_ok=True)
+                seg_frame_count = len(list(seg_frames_dir.glob("frame_*.jpg")))
+
+                with self._lock:
+                    self._session = session
+
+                self._stop_event.clear()
+                self._thread = threading.Thread(
+                    target=self._capture_loop,
+                    args=(session_dir, seg_frame_count),
+                    daemon=True,
+                    name=f"timelapse-{session.id}",
+                )
+                self._thread.start()
+                return session.id
+            except Exception:
+                pass
+        return None
 
     @property
     def active(self) -> bool:
         with self._lock:
             return self._session is not None and self._session.status == "running"
 
-    def start(self, name: str, interval_sec: int) -> dict:
+    def start(self, name: str, interval_sec: int, segment_hours: float = 2.0) -> dict:
         with self._lock:
             if self._session is not None and self._session.status == "running":
                 raise ValueError("A timelapse is already running")
@@ -44,27 +81,28 @@ class TimelapseManager:
             ts = datetime.now().strftime("%Y%m%d-%H%M%S")
             safe_name = re.sub(r"[^a-zA-Z0-9_-]", "-", name.strip()) or "timelapse"
             tl_id = f"{ts}_{safe_name}"
-
             session_dir = self.base_dir / tl_id
-            (session_dir / "frames").mkdir(parents=True)
+            (session_dir / "seg_001" / "frames").mkdir(parents=True)
 
             self._session = TimelapseSession(
                 id=tl_id,
                 name=name,
                 interval_sec=interval_sec,
+                segment_hours=segment_hours,
                 start_time=time.time(),
             )
             self._write_meta(session_dir, self._session)
+            result = asdict(self._session)
 
-            self._stop_event.clear()
-            self._thread = threading.Thread(
-                target=self._capture_loop,
-                args=(session_dir,),
-                daemon=True,
-                name=f"timelapse-{tl_id}",
-            )
-            self._thread.start()
-            return asdict(self._session)
+        self._stop_event.clear()
+        self._thread = threading.Thread(
+            target=self._capture_loop,
+            args=(session_dir, 0),
+            daemon=True,
+            name=f"timelapse-{tl_id}",
+        )
+        self._thread.start()
+        return result
 
     def stop(self) -> dict:
         with self._lock:
@@ -77,16 +115,20 @@ class TimelapseManager:
         if self._thread:
             self._thread.join(timeout=30)
 
+        for t in list(self._seg_threads):
+            t.join(timeout=120)
+        self._seg_threads.clear()
+
         with self._lock:
             session.end_time = time.time()
             session.status = "compiling"
             self._write_meta(session_dir, session)
 
         threading.Thread(
-            target=self._compile,
+            target=self._finalize,
             args=(session_dir, session),
             daemon=True,
-            name=f"compile-{session.id}",
+            name=f"finalize-{session.id}",
         ).start()
 
         return asdict(session)
@@ -105,6 +147,9 @@ class TimelapseManager:
                 "frame_count": s.frame_count,
                 "elapsed_sec": int(now - s.start_time),
                 "interval_sec": s.interval_sec,
+                "segment_hours": s.segment_hours,
+                "segment_index": s.segment_index,
+                "segments_compiled": s.segments_compiled,
             }
 
     def list_timelapses(self) -> list:
@@ -113,10 +158,14 @@ class TimelapseManager:
             try:
                 meta = json.loads(meta_file.read_text())
                 tl_id = meta["id"]
+                tl_dir = self.base_dir / tl_id
+                # Support both new seg_001/frames/ layout and legacy frames/ layout
                 meta["has_thumbnail"] = (
-                    self.base_dir / tl_id / "frames" / "frame_00001.jpg"
-                ).exists()
-                meta["has_video"] = (self.base_dir / tl_id / "output.mp4").exists()
+                    (tl_dir / "seg_001" / "frames" / "frame_00001.jpg").exists()
+                    or (tl_dir / "frames" / "frame_00001.jpg").exists()
+                )
+                meta["has_video"] = (tl_dir / "output.mp4").exists()
+                meta["can_preview"] = bool(list(tl_dir.glob("seg_*/seg_*.mp4")))
                 results.append(meta)
             except Exception:
                 pass
@@ -132,54 +181,154 @@ class TimelapseManager:
             raise FileNotFoundError(f"Timelapse '{tl_id}' not found")
         shutil.rmtree(target)
 
-    # ── internal ──────────────────────────────────────────────────────────────
+    def build_preview(self, tl_id: str) -> Optional[Path]:
+        """Lossless concat of all compiled segments → preview.mp4. Fast (~1s)."""
+        safe = re.sub(r"[^a-zA-Z0-9_-]", "", tl_id)
+        session_dir = self.base_dir / safe
+        if not session_dir.exists():
+            return None
 
-    def _capture_loop(self, session_dir: Path):
+        seg_files = sorted(session_dir.glob("seg_*/seg_*.mp4"))
+        if not seg_files:
+            return None
+
+        preview_path = session_dir / "preview.mp4"
+
+        if len(seg_files) == 1:
+            shutil.copy2(seg_files[0], preview_path)
+            return preview_path
+
+        concat_list = session_dir / "concat.txt"
+        concat_list.write_text("\n".join(f"file '{f.resolve()}'" for f in seg_files))
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                 "-i", str(concat_list), "-c", "copy", str(preview_path)],
+                check=True, capture_output=True, timeout=120,
+            )
+            return preview_path
+        except Exception:
+            return None
+        finally:
+            concat_list.unlink(missing_ok=True)
+
+    # ── Internal ──────────────────────────────────────────────────────────────
+
+    def _capture_loop(self, session_dir: Path, initial_seg_frames: int):
         with self._lock:
+            if self._session is None:
+                return
             interval = self._session.interval_sec
+            segment_secs = self._session.segment_hours * 3600
+            seg_idx = self._session.segment_index
+
+        seg_frame_count = initial_seg_frames
+        seg_start = time.time()
 
         while not self._stop_event.is_set():
             frame = self._get_frame()
             if frame:
+                seg_frame_count += 1
+                seg_frames_dir = session_dir / f"seg_{seg_idx:03d}" / "frames"
+                (seg_frames_dir / f"frame_{seg_frame_count:05d}.jpg").write_bytes(frame)
                 with self._lock:
-                    if self._session is None:
-                        break
-                    self._session.frame_count += 1
-                    n = self._session.frame_count
-                (session_dir / "frames" / f"frame_{n:05d}.jpg").write_bytes(frame)
+                    if self._session:
+                        self._session.frame_count += 1
+                        if self._session.frame_count % 30 == 0:
+                            self._write_meta(session_dir, self._session)
+
+            if time.time() - seg_start >= segment_secs:
+                seg_idx, seg_frame_count = self._rotate_segment(session_dir, seg_idx)
+                seg_start = time.time()
+
             self._stop_event.wait(timeout=interval)
 
-    def _compile(self, session_dir: Path, session: TimelapseSession):
-        output = session_dir / "output.mp4"
-        pattern = str(session_dir / "frames" / "frame_%05d.jpg")
-        cmd = [
-            "ffmpeg", "-y",
-            "-r", "24",
-            "-i", pattern,
-            "-c:v", "libx264",
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
-            str(output),
-        ]
+    def _rotate_segment(self, session_dir: Path, completed_idx: int) -> tuple:
+        next_idx = completed_idx + 1
+        (session_dir / f"seg_{next_idx:03d}" / "frames").mkdir(parents=True, exist_ok=True)
+
+        with self._lock:
+            if self._session:
+                self._session.segment_index = next_idx
+                self._write_meta(session_dir, self._session)
+
+        # Prune dead compile threads before appending
+        self._seg_threads = [t for t in self._seg_threads if t.is_alive()]
+
+        t = threading.Thread(
+            target=self._compile_segment,
+            args=(session_dir, completed_idx, True),
+            daemon=True,
+            name=f"seg-{session_dir.name}-{completed_idx:03d}",
+        )
+        t.start()
+        self._seg_threads.append(t)
+
+        return next_idx, 0
+
+    def _compile_segment(self, session_dir: Path, seg_idx: int, update_count: bool = False) -> bool:
+        seg_dir = session_dir / f"seg_{seg_idx:03d}"
+        output = seg_dir / f"seg_{seg_idx:03d}.mp4"
+        frames_dir = seg_dir / "frames"
+
+        if not frames_dir.exists() or not list(frames_dir.glob("frame_*.jpg")):
+            return False
+
         try:
-            subprocess.run(cmd, check=True, capture_output=True, timeout=600)
+            subprocess.run(
+                ["ffmpeg", "-y", "-r", "24",
+                 "-i", str(frames_dir / "frame_%05d.jpg"),
+                 "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                 "-movflags", "+faststart", str(output)],
+                check=True, capture_output=True, timeout=600,
+            )
+            if update_count:
+                with self._lock:
+                    if self._session and self._session.id == session_dir.name:
+                        self._session.segments_compiled += 1
+                        self._write_meta(session_dir, self._session)
+            return True
+        except Exception:
+            return False
+
+    def _finalize(self, session_dir: Path, session: TimelapseSession):
+        # Compile last partial segment (synchronous — capture loop is already stopped)
+        self._compile_segment(session_dir, session.segment_index)
+
+        seg_files = sorted(session_dir.glob("seg_*/seg_*.mp4"))
+        output = session_dir / "output.mp4"
+
+        try:
+            if not seg_files:
+                raise ValueError("No compiled segments found")
+
+            if len(seg_files) == 1:
+                shutil.copy2(seg_files[0], output)
+            else:
+                concat_list = session_dir / "concat.txt"
+                concat_list.write_text(
+                    "\n".join(f"file '{f.resolve()}'" for f in seg_files)
+                )
+                try:
+                    subprocess.run(
+                        ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                         "-i", str(concat_list), "-c", "copy", str(output)],
+                        check=True, capture_output=True, timeout=300,
+                    )
+                finally:
+                    concat_list.unlink(missing_ok=True)
+
             session.status = "done"
-        except subprocess.CalledProcessError as e:
-            session.status = "error"
-            session.error = e.stderr.decode(errors="replace")[-500:]
         except Exception as e:
             session.status = "error"
-            session.error = str(e)
+            session.error = str(e)[-500:]
         finally:
             session.end_time = time.time()
             self._write_meta(session_dir, session)
             with self._lock:
                 if self._session and self._session.id == session.id:
                     self._session.status = session.status
-                    if session.status in ("done", "error"):
-                        # keep session visible for status polling, clear on next start
-                        pass
 
     @staticmethod
-    def _write_meta(session_dir: Path, session: TimelapseSession):
+    def _write_meta(session_dir: Path, session: "TimelapseSession"):
         (session_dir / "meta.json").write_text(json.dumps(asdict(session), indent=2))
