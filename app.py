@@ -134,6 +134,7 @@ _sched_stop = threading.Event()
 
 
 def _scheduler_loop():
+    global _schedule
     while not _sched_stop.is_set():
         now = time.time()
         with _schedule_lock:
@@ -158,7 +159,6 @@ def _scheduler_loop():
                 except ValueError:
                     pass
             with _schedule_lock:
-                global _schedule
                 if _schedule is sched:
                     _schedule = None
 
