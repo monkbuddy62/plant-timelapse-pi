@@ -123,6 +123,28 @@
   }
   .field input:focus, .field select:focus { border-color: var(--green); }
   .field input[type="number"] { -moz-appearance: textfield; }
+  .field input[type="range"] {
+    padding: 0;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    height: 20px;
+    accent-color: var(--green);
+  }
+  .field input[type="datetime-local"] {
+    color-scheme: dark;
+  }
+  .ctrl-label-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .ctrl-label-row span:last-child {
+    color: var(--text);
+    font-weight: 500;
+  }
 
   .interval-row { display: flex; gap: 8px; align-items: center; }
   .interval-row input { flex: 1; }
@@ -407,6 +429,74 @@
         <span class="value" id="cam-fps">—</span>
       </div>
     </div>
+
+    <div class="card">
+      <h2>Image Controls</h2>
+      <div class="field">
+        <label>White Balance</label>
+        <select id="ctrl-awb" onchange="applyControls()">
+          <option value="0">Auto</option>
+          <option value="1">Tungsten</option>
+          <option value="2">Fluorescent</option>
+          <option value="3">Indoor</option>
+          <option value="4">Daylight</option>
+          <option value="5">Cloudy</option>
+        </select>
+      </div>
+      <div class="field">
+        <div class="ctrl-label-row"><span>Brightness</span><span id="lbl-brightness">0.0</span></div>
+        <input type="range" id="ctrl-brightness" min="-1" max="1" step="0.1" value="0"
+               oninput="syncLabel('ctrl-brightness','lbl-brightness',1); applyControls()">
+      </div>
+      <div class="field">
+        <div class="ctrl-label-row"><span>Contrast</span><span id="lbl-contrast">1.0</span></div>
+        <input type="range" id="ctrl-contrast" min="0" max="4" step="0.1" value="1"
+               oninput="syncLabel('ctrl-contrast','lbl-contrast',1); applyControls()">
+      </div>
+      <div class="field">
+        <div class="ctrl-label-row"><span>Saturation</span><span id="lbl-saturation">1.0</span></div>
+        <input type="range" id="ctrl-saturation" min="0" max="4" step="0.1" value="1"
+               oninput="syncLabel('ctrl-saturation','lbl-saturation',1); applyControls()">
+      </div>
+      <div class="field">
+        <div class="ctrl-label-row"><span>Sharpness</span><span id="lbl-sharpness">1.0</span></div>
+        <input type="range" id="ctrl-sharpness" min="0" max="4" step="0.1" value="1"
+               oninput="syncLabel('ctrl-sharpness','lbl-sharpness',1); applyControls()">
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Schedule</h2>
+      <div id="sched-status" style="display:none; margin-bottom:12px;"></div>
+      <div id="sched-form">
+        <div class="field">
+          <label>Name</label>
+          <input id="sched-name" type="text" placeholder="morning-grow" maxlength="64">
+        </div>
+        <div class="field">
+          <label>Interval between frames</label>
+          <div class="interval-row">
+            <input id="sched-interval" type="number" min="1" max="86400" value="30">
+            <span>seconds</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Start time</label>
+          <input id="sched-start" type="datetime-local">
+        </div>
+        <div class="field">
+          <label>Stop time <span style="color:var(--muted)">(optional)</span></label>
+          <input id="sched-stop" type="datetime-local">
+        </div>
+        <div class="error-msg" id="sched-error"></div>
+        <button class="btn btn-green" id="btn-sched-set" onclick="setSchedule()">
+          &#128337; Set Schedule
+        </button>
+      </div>
+      <div id="sched-clear-btn" style="display:none; margin-top:8px;">
+        <button class="btn btn-ghost" onclick="clearSchedule()">Clear Schedule</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -681,15 +771,163 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeModal();
 });
 
+// ── Image controls ────────────────────────────────────────────────────────────
+function syncLabel(sliderId, labelId, decimals) {
+  document.getElementById(labelId).textContent =
+    parseFloat(document.getElementById(sliderId).value).toFixed(decimals);
+}
+
+let _ctrlDebounce = null;
+function applyControls() {
+  clearTimeout(_ctrlDebounce);
+  _ctrlDebounce = setTimeout(async () => {
+    const controls = {
+      Brightness: parseFloat(document.getElementById('ctrl-brightness').value),
+      Contrast:   parseFloat(document.getElementById('ctrl-contrast').value),
+      Saturation: parseFloat(document.getElementById('ctrl-saturation').value),
+      Sharpness:  parseFloat(document.getElementById('ctrl-sharpness').value),
+      AwbMode:    parseInt(document.getElementById('ctrl-awb').value, 10),
+    };
+    try {
+      await fetch('/api/camera/controls', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(controls),
+      });
+    } catch (_) {}
+  }, 350);
+}
+
+async function fetchCameraControls() {
+  try {
+    const r = await fetch('/api/camera/controls');
+    const d = await r.json();
+    if ('Brightness' in d) {
+      document.getElementById('ctrl-brightness').value = d.Brightness;
+      syncLabel('ctrl-brightness', 'lbl-brightness', 1);
+    }
+    if ('Contrast' in d) {
+      document.getElementById('ctrl-contrast').value = d.Contrast;
+      syncLabel('ctrl-contrast', 'lbl-contrast', 1);
+    }
+    if ('Saturation' in d) {
+      document.getElementById('ctrl-saturation').value = d.Saturation;
+      syncLabel('ctrl-saturation', 'lbl-saturation', 1);
+    }
+    if ('Sharpness' in d) {
+      document.getElementById('ctrl-sharpness').value = d.Sharpness;
+      syncLabel('ctrl-sharpness', 'lbl-sharpness', 1);
+    }
+    if ('AwbMode' in d) {
+      document.getElementById('ctrl-awb').value = d.AwbMode;
+    }
+  } catch (_) {}
+}
+
+// ── Schedule ──────────────────────────────────────────────────────────────────
+function toDatetimeLocal(ts) {
+  const d = new Date(ts * 1000);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+async function fetchSchedule() {
+  try {
+    const r = await fetch('/api/schedule');
+    const d = await r.json();
+    renderSchedule(d);
+  } catch (_) {}
+}
+
+function renderSchedule(d) {
+  const statusEl  = document.getElementById('sched-status');
+  const formEl    = document.getElementById('sched-form');
+  const clearBtn  = document.getElementById('sched-clear-btn');
+
+  if (!d.active) {
+    statusEl.style.display = 'none';
+    formEl.style.display   = 'block';
+    clearBtn.style.display = 'none';
+    return;
+  }
+
+  const startStr = new Date(d.start_ts * 1000).toLocaleString();
+  const stopStr  = d.stop_ts ? new Date(d.stop_ts * 1000).toLocaleString() : 'Manual';
+  const state    = d.started ? '<span class="badge badge-running">Running</span>'
+                             : '<span class="badge badge-compiling">Waiting</span>';
+
+  statusEl.innerHTML = `
+    <div class="status-row"><span class="label">Name</span><span class="value">${escHtml(d.name)}</span></div>
+    <div class="status-row"><span class="label">State</span><span>${state}</span></div>
+    <div class="status-row"><span class="label">Start</span><span class="value">${startStr}</span></div>
+    <div class="status-row"><span class="label">Stop</span><span class="value">${stopStr}</span></div>
+  `;
+  statusEl.style.display = 'block';
+  formEl.style.display   = 'none';
+  clearBtn.style.display = 'block';
+}
+
+async function setSchedule() {
+  const name     = document.getElementById('sched-name').value.trim() || 'timelapse';
+  const interval = parseInt(document.getElementById('sched-interval').value, 10) || 30;
+  const startVal = document.getElementById('sched-start').value;
+  const stopVal  = document.getElementById('sched-stop').value;
+  const errEl    = document.getElementById('sched-error');
+  errEl.style.display = 'none';
+
+  if (!startVal) {
+    errEl.textContent = 'Start time is required';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const startTs = new Date(startVal).getTime() / 1000;
+  const stopTs  = stopVal ? new Date(stopVal).getTime() / 1000 : null;
+
+  document.getElementById('btn-sched-set').disabled = true;
+  try {
+    const r = await fetch('/api/schedule', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, interval_sec: interval, start_ts: startTs, stop_ts: stopTs }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Failed');
+    await fetchSchedule();
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.style.display = 'block';
+  }
+  document.getElementById('btn-sched-set').disabled = false;
+}
+
+async function clearSchedule() {
+  try {
+    await fetch('/api/schedule', { method: 'DELETE' });
+    await fetchSchedule();
+  } catch (_) {}
+}
+
+// Prefill start time to now + 10 min
+(function() {
+  const d = new Date(Date.now() + 10 * 60000);
+  const pad = n => String(n).padStart(2, '0');
+  document.getElementById('sched-start').value =
+    `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+})();
+
 // ── Polling ───────────────────────────────────────────────────────────────────
 initStream();
 fetchCameraStatus();
+fetchCameraControls();
 fetchTlStatus();
 fetchTimelapses();
+fetchSchedule();
 
 setInterval(fetchTlStatus, 2000);
 setInterval(fetchTimelapses, 6000);
 setInterval(fetchCameraStatus, 10000);
+setInterval(fetchSchedule, 15000);
 </script>
 </body>
 </html>

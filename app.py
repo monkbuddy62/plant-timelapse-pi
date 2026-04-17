@@ -4,7 +4,10 @@ import os
 import re
 import time
 import threading
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from flask import Flask, Response, jsonify, request, send_file, render_template
 
@@ -26,9 +29,25 @@ _cam_stop = threading.Event()
 _cam_thread: threading.Thread | None = None
 _cam_error: str = ""
 
+# ── Camera controls ────────────────────────────────────────────────────────────
+_cam_controls: dict = {}
+_picam2_lock = threading.Lock()
+_picam2_ref = None
+
+
+def update_camera_controls(controls: dict):
+    global _cam_controls, _picam2_ref
+    _cam_controls = dict(controls)
+    with _picam2_lock:
+        if _picam2_ref is not None:
+            try:
+                _picam2_ref.set_controls(controls)
+            except Exception as exc:
+                app.logger.warning("set_controls failed: %s", exc)
+
 
 def _camera_loop():
-    global _latest_frame, _cam_error
+    global _latest_frame, _cam_error, _picam2_ref
     try:
         from picamera2 import Picamera2
         from PIL import Image
@@ -40,6 +59,11 @@ def _camera_loop():
         picam2.configure(config)
         picam2.start()
         time.sleep(1.0)
+
+        with _picam2_lock:
+            _picam2_ref = picam2
+            if _cam_controls:
+                picam2.set_controls(_cam_controls)
 
         interval = 1.0 / STREAM_FPS
         try:
@@ -56,6 +80,8 @@ def _camera_loop():
                 if wait > 0:
                     time.sleep(wait)
         finally:
+            with _picam2_lock:
+                _picam2_ref = None
             picam2.stop()
             picam2.close()
     except Exception as exc:
@@ -90,6 +116,53 @@ atexit.register(stop_camera)
 
 # ── Timelapse manager ──────────────────────────────────────────────────────────
 tl = TimelapseManager(TIMELAPSES_DIR, get_frame)
+
+
+# ── Schedule ───────────────────────────────────────────────────────────────────
+@dataclass
+class ScheduleEntry:
+    name: str
+    interval_sec: int
+    start_ts: float
+    stop_ts: Optional[float] = None
+    started: bool = False
+
+
+_schedule: Optional[ScheduleEntry] = None
+_schedule_lock = threading.Lock()
+_sched_stop = threading.Event()
+
+
+def _scheduler_loop():
+    while not _sched_stop.is_set():
+        now = time.time()
+        with _schedule_lock:
+            sched = _schedule
+
+        if sched and not sched.started and now >= sched.start_ts:
+            if not tl.active:
+                try:
+                    tl.start(sched.name, sched.interval_sec)
+                    app.logger.info("Scheduled timelapse started: %s", sched.name)
+                except ValueError:
+                    pass
+            with _schedule_lock:
+                if _schedule is sched:
+                    _schedule.started = True
+
+        if sched and sched.started and sched.stop_ts and now >= sched.stop_ts:
+            if tl.active:
+                try:
+                    tl.stop()
+                    app.logger.info("Scheduled timelapse stopped: %s", sched.name)
+                except ValueError:
+                    pass
+            with _schedule_lock:
+                global _schedule
+                if _schedule is sched:
+                    _schedule = None
+
+        _sched_stop.wait(timeout=30)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -193,6 +266,82 @@ def delete_timelapse(tl_id: str):
         return jsonify({"error": str(exc)}), 409
 
 
+# ── Camera controls routes ─────────────────────────────────────────────────────
+@app.route("/api/camera/controls", methods=["GET"])
+def get_camera_controls():
+    return jsonify(_cam_controls)
+
+
+@app.route("/api/camera/controls", methods=["POST"])
+def set_camera_controls():
+    data = request.get_json(silent=True) or {}
+    controls = {}
+    if "Brightness" in data:
+        controls["Brightness"] = max(-1.0, min(1.0, float(data["Brightness"])))
+    if "Contrast" in data:
+        controls["Contrast"] = max(0.0, min(32.0, float(data["Contrast"])))
+    if "Saturation" in data:
+        controls["Saturation"] = max(0.0, min(32.0, float(data["Saturation"])))
+    if "Sharpness" in data:
+        controls["Sharpness"] = max(0.0, min(16.0, float(data["Sharpness"])))
+    if "AwbMode" in data:
+        awb = int(data["AwbMode"])
+        if 0 <= awb <= 5:
+            controls["AwbMode"] = awb
+    update_camera_controls(controls)
+    return jsonify({"ok": True, "controls": controls})
+
+
+# ── Schedule routes ────────────────────────────────────────────────────────────
+@app.route("/api/schedule", methods=["GET"])
+def get_schedule():
+    with _schedule_lock:
+        s = _schedule
+    if s is None:
+        return jsonify({"active": False})
+    return jsonify({
+        "active": True,
+        "name": s.name,
+        "interval_sec": s.interval_sec,
+        "start_ts": s.start_ts,
+        "stop_ts": s.stop_ts,
+        "started": s.started,
+    })
+
+
+@app.route("/api/schedule", methods=["POST"])
+def set_schedule():
+    global _schedule
+    data = request.get_json(silent=True) or {}
+    try:
+        name = str(data.get("name", "timelapse"))[:64].strip() or "timelapse"
+        interval_sec = max(1, int(data.get("interval_sec", 30)))
+        start_ts = float(data["start_ts"])
+        stop_ts = float(data["stop_ts"]) if data.get("stop_ts") else None
+    except (KeyError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    if stop_ts and stop_ts <= start_ts:
+        return jsonify({"error": "Stop time must be after start time"}), 400
+    with _schedule_lock:
+        _schedule = ScheduleEntry(
+            name=name,
+            interval_sec=interval_sec,
+            start_ts=start_ts,
+            stop_ts=stop_ts,
+        )
+    return jsonify({"ok": True})
+
+
+@app.route("/api/schedule", methods=["DELETE"])
+def clear_schedule():
+    global _schedule
+    with _schedule_lock:
+        _schedule = None
+    return jsonify({"ok": True})
+
+
 if __name__ == "__main__":
     start_camera()
+    sched_thread = threading.Thread(target=_scheduler_loop, daemon=True, name="scheduler")
+    sched_thread.start()
     app.run(host="0.0.0.0", port=5000, threaded=True, use_reloader=False)
