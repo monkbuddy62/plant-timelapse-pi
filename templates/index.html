@@ -473,6 +473,10 @@
         <span class="label">Checkpoints</span>
         <span class="value" id="st-segments">—</span>
       </div>
+      <div class="status-row">
+        <span class="label">Size on disk</span>
+        <span class="value" id="st-disk">—</span>
+      </div>
       <div class="status-row" id="st-dark-row" style="display:none">
         <span class="label">Dark skipped</span>
         <span class="value" id="st-dark">0</span>
@@ -717,6 +721,14 @@ async function stopTimelapse() {
   document.getElementById('btn-stop').disabled = false;
 }
 
+function fmtBytes(b) {
+  if (!b) return '0 B';
+  if (b < 1024) return b + ' B';
+  if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+  if (b < 1024 * 1024 * 1024) return (b / (1024 * 1024)).toFixed(1) + ' MB';
+  return (b / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+}
+
 function fmtElapsed(sec) {
   if (sec < 60) return `${sec}s`;
   if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
@@ -750,6 +762,7 @@ async function fetchTlStatus() {
 
     document.getElementById('st-name').textContent = d.name || '—';
     document.getElementById('st-frames').textContent = d.frame_count ?? 0;
+    document.getElementById('st-disk').textContent = fmtBytes(d.disk_bytes);
     document.getElementById('st-elapsed').textContent = fmtElapsed(d.elapsed_sec || 0);
     document.getElementById('st-interval').textContent =
       d.interval_sec ? `every ${d.interval_sec}s` : '—';
@@ -880,7 +893,7 @@ function renderTimelapses(list) {
         <div class="tl-info">
           <div class="tl-name" title="${escAttr(t.name)}">${escHtml(t.name)}</div>
           <div class="tl-meta">${date}</div>
-          <div class="tl-meta">${frames} frames · ${duration}</div>
+          <div class="tl-meta">${frames} frames · ${duration} · ${fmtBytes(t.disk_bytes)}</div>
         </div>
         <div class="tl-actions">
           ${canPlay

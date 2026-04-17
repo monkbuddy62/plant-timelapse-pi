@@ -224,6 +224,7 @@ class TimelapseManager:
                 "sunset_offset_min": s.sunset_offset_min,
                 "tz_offset_min": s.tz_offset_min,
                 "capture_alive": self._thread is not None and self._thread.is_alive(),
+                "disk_bytes": _dir_size(self.base_dir / s.id),
             }
 
         # Calibrate clock offset from browser timestamp before any time-sensitive work.
@@ -263,6 +264,7 @@ class TimelapseManager:
                 )
                 meta["has_video"] = (tl_dir / "output.mp4").exists()
                 meta["can_preview"] = bool(list(tl_dir.glob("seg_*/seg_*.mp4")))
+                meta["disk_bytes"] = _dir_size(tl_dir)
                 results.append(meta)
             except Exception:
                 pass
@@ -463,6 +465,14 @@ class TimelapseManager:
     @staticmethod
     def _write_meta(session_dir: Path, session: "TimelapseSession"):
         (session_dir / "meta.json").write_text(json.dumps(asdict(session), indent=2))
+
+
+def _dir_size(path: Path) -> int:
+    """Total bytes of all files under path."""
+    try:
+        return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+    except Exception:
+        return 0
 
 
 def _avg_brightness(jpeg_bytes: bytes) -> float:
