@@ -124,7 +124,7 @@ class TimelapseManager:
 
     def delete(self, tl_id: str):
         with self._lock:
-            if self._session and self._session.id == tl_id:
+            if self._session and self._session.id == tl_id and self._session.status in ("running", "compiling"):
                 raise ValueError("Cannot delete an active timelapse; stop it first")
         safe = re.sub(r"[^a-zA-Z0-9_-]", "", tl_id)
         target = self.base_dir / safe
