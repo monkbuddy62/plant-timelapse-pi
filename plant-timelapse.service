@@ -3,9 +3,9 @@ Description=Plant Timelapse Monitor
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/python3 /home/pi/plant-timelapse/app.py
-WorkingDirectory=/home/pi/plant-timelapse
-User=pi
+ExecStart=/usr/bin/python3 /home/pato/plant-timelapse/app.py
+WorkingDirectory=/home/pato/plant-timelapse
+User=pato
 Restart=always
 RestartSec=5
 # Give the camera stack time to initialize on boot

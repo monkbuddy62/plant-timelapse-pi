@@ -2,7 +2,7 @@
 set -e
 
 REPO="https://github.com/monkbuddy62/plant-timelapse-pi.git"
-INSTALL_DIR="/home/pi/plant-timelapse"
+INSTALL_DIR="/home/pato/plant-timelapse"
 
 echo "Cloning plant-timelapse-pi..."
 git clone "$REPO" "$INSTALL_DIR"
