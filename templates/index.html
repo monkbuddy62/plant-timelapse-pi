@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plant Monitor</title>
+<style>
+  :root {
+    --bg: #0d0d0d;
+    --card: #181818;
+    --card2: #222;
+    --border: #2a2a2a;
+    --text: #e8e8e8;
+    --muted: #777;
+    --green: #4ade80;
+    --green-dim: #166534;
+    --red: #f87171;
+    --yellow: #fbbf24;
+    --radius: 8px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--card);
+  }
+  header h1 { font-size: 18px; font-weight: 600; letter-spacing: 0.3px; }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted); flex-shrink: 0;
+  }
+  .dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot.error { background: var(--red); }
+  #cam-label { font-size: 12px; color: var(--muted); }
+
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 16px;
+    padding: 16px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  @media (max-width: 700px) {
+    .main-grid { grid-template-columns: 1fr; }
+  }
+
+  .stream-wrap {
+    background: #000;
+    border-radius: var(--radius);
+    overflow: hidden;
+    aspect-ratio: 16/9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    position: relative;
+  }
+  #stream-img {
+    width: 100%; height: 100%; object-fit: contain;
+    display: block;
+  }
+  #stream-placeholder {
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+    padding: 20px;
+  }
+
+  .controls-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+  }
+
+  .card h2 {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+
+  .field { margin-bottom: 12px; }
+  .field label {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .field input, .field select {
+    width: 100%;
+    background: var(--card2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .field input:focus, .field select:focus { border-color: var(--green); }
+  .field input[type="number"] { -moz-appearance: textfield; }
+
+  .interval-row { display: flex; gap: 8px; align-items: center; }
+  .interval-row input { flex: 1; }
+  .interval-row span { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+  .btn {
+    width: 100%;
+    padding: 9px 16px;
+    border-radius: 6px;
+    border: none;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s, background 0.15s;
+    letter-spacing: 0.3px;
+  }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-green { background: var(--green); color: #000; }
+  .btn-green:hover:not(:disabled) { opacity: 0.85; }
+  .btn-red { background: var(--red); color: #000; }
+  .btn-red:hover:not(:disabled) { opacity: 0.85; }
+  .btn-ghost {
+    background: var(--card2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover:not(:disabled) { border-color: #555; }
+
+  .status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .status-row:last-of-type { border-bottom: none; }
+  .status-row .label { color: var(--muted); }
+  .status-row .value { font-weight: 500; }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .badge-running { background: var(--green-dim); color: var(--green); }
+  .badge-compiling { background: #292524; color: var(--yellow); }
+  .badge-done { background: #1a2e1a; color: var(--green); }
+  .badge-error { background: #2d1515; color: var(--red); }
+
+  /* ── Timelapse grid ── */
+  .timelapses-section {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 16px 32px;
+  }
+  .timelapses-section h2 {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+  .tl-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .tl-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .tl-thumb {
+    aspect-ratio: 16/9;
+    background: #000;
+    overflow: hidden;
+    position: relative;
+    cursor: pointer;
+  }
+  .tl-thumb img {
+    width: 100%; height: 100%; object-fit: cover;
+    display: block;
+    transition: opacity 0.2s;
+  }
+  .tl-thumb:hover img { opacity: 0.8; }
+  .tl-thumb .play-overlay {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity 0.2s;
+    background: rgba(0,0,0,0.4);
+  }
+  .tl-thumb:hover .play-overlay { opacity: 1; }
+  .play-icon {
+    width: 40px; height: 40px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+  }
+  .tl-thumb-placeholder {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 12px;
+  }
+  .tl-info {
+    padding: 10px 12px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .tl-name {
+    font-size: 13px; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .tl-meta { font-size: 11px; color: var(--muted); }
+  .tl-actions {
+    display: flex;
+    gap: 6px;
+    padding: 8px 12px 10px;
+    border-top: 1px solid var(--border);
+  }
+  .tl-actions .btn {
+    flex: 1;
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+  .compiling-overlay {
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 8px; color: var(--yellow); font-size: 12px;
+  }
+  .spinner {
+    width: 24px; height: 24px;
+    border: 2px solid #444;
+    border-top-color: var(--yellow);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Modal ── */
+  #modal {
+    display: none;
+    position: fixed; inset: 0; z-index: 100;
+    align-items: center; justify-content: center;
+  }
+  #modal.open { display: flex; }
+  .modal-backdrop {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,0.85);
+  }
+  .modal-inner {
+    position: relative; z-index: 1;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    width: min(90vw, 900px);
+  }
+  .modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 12px;
+  }
+  .modal-title { font-size: 15px; font-weight: 600; }
+  .modal-close {
+    background: none; border: none; color: var(--muted);
+    font-size: 20px; cursor: pointer; padding: 0 4px; line-height: 1;
+  }
+  .modal-close:hover { color: var(--text); }
+  #modal-video {
+    width: 100%; border-radius: 6px; display: block;
+    background: #000; max-height: 60vh;
+  }
+
+  .error-msg {
+    background: #2d1515;
+    border: 1px solid #5c2020;
+    color: var(--red);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 12px;
+    margin-top: 8px;
+    display: none;
+  }
+
+  .empty-state {
+    color: var(--muted);
+    font-size: 13px;
+    padding: 24px 0;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="dot" id="cam-dot"></div>
+  <h1>Plant Monitor</h1>
+  <span id="cam-label">connecting…</span>
+</header>
+
+<div class="main-grid">
+  <!-- Live stream -->
+  <div class="stream-wrap">
+    <div id="stream-placeholder">
+      <div class="spinner" style="margin: 0 auto 10px;"></div>
+      Waiting for camera…
+    </div>
+    <img id="stream-img" alt="Live stream" style="display:none"
+         onload="onStreamLoad()" onerror="onStreamError()">
+  </div>
+
+  <!-- Controls -->
+  <div class="controls-panel">
+    <div class="card" id="tl-form-card">
+      <h2>New Timelapse</h2>
+
+      <div class="field">
+        <label>Name</label>
+        <input id="tl-name" type="text" placeholder="basil-grow" maxlength="64" value="">
+      </div>
+
+      <div class="field">
+        <label>Interval between frames</label>
+        <div class="interval-row">
+          <input id="tl-interval" type="number" min="1" max="86400" value="30">
+          <span>seconds</span>
+        </div>
+      </div>
+
+      <div class="error-msg" id="start-error"></div>
+      <button class="btn btn-green" id="btn-start" onclick="startTimelapse()">
+        &#9654; Start Timelapse
+      </button>
+    </div>
+
+    <div class="card" id="tl-status-card" style="display:none">
+      <h2>Running</h2>
+      <div class="status-row">
+        <span class="label">Name</span>
+        <span class="value" id="st-name">—</span>
+      </div>
+      <div class="status-row">
+        <span class="label">Status</span>
+        <span id="st-badge"></span>
+      </div>
+      <div class="status-row">
+        <span class="label">Frames captured</span>
+        <span class="value" id="st-frames">0</span>
+      </div>
+      <div class="status-row">
+        <span class="label">Elapsed</span>
+        <span class="value" id="st-elapsed">0s</span>
+      </div>
+      <div class="status-row">
+        <span class="label">Interval</span>
+        <span class="value" id="st-interval">—</span>
+      </div>
+      <br>
+      <button class="btn btn-red" id="btn-stop" onclick="stopTimelapse()">
+        &#9632; Stop &amp; Compile
+      </button>
+    </div>
+
+    <div class="card">
+      <h2>Camera</h2>
+      <div class="status-row">
+        <span class="label">Resolution</span>
+        <span class="value" id="cam-res">—</span>
+      </div>
+      <div class="status-row">
+        <span class="label">Stream FPS</span>
+        <span class="value" id="cam-fps">—</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Past timelapses -->
+<div class="timelapses-section">
+  <h2>Past Timelapses</h2>
+  <div id="tl-grid" class="tl-grid">
+    <span class="empty-state">No timelapses yet.</span>
+  </div>
+</div>
+
+<!-- Video modal -->
+<div id="modal">
+  <div class="modal-backdrop" onclick="closeModal()"></div>
+  <div class="modal-inner">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title"></span>
+      <button class="modal-close" onclick="closeModal()">&#10005;</button>
+    </div>
+    <video id="modal-video" controls></video>
+  </div>
+</div>
+
+<script>
+// ── Stream ────────────────────────────────────────────────────────────────────
+let streamReady = false;
+
+function initStream() {
+  const img = document.getElementById('stream-img');
+  img.src = '/stream?' + Date.now();
+}
+
+function onStreamLoad() {
+  streamReady = true;
+  document.getElementById('stream-img').style.display = 'block';
+  document.getElementById('stream-placeholder').style.display = 'none';
+  const dot = document.getElementById('cam-dot');
+  dot.className = 'dot live';
+  document.getElementById('cam-label').textContent = 'LIVE';
+}
+
+function onStreamError() {
+  streamReady = false;
+  document.getElementById('stream-img').style.display = 'none';
+  document.getElementById('stream-placeholder').innerHTML =
+    '<div style="color:#f87171">Stream unavailable — retrying…</div>';
+  document.getElementById('cam-dot').className = 'dot error';
+  document.getElementById('cam-label').textContent = 'no stream';
+  setTimeout(initStream, 3000);
+}
+
+// ── Camera status ─────────────────────────────────────────────────────────────
+async function fetchCameraStatus() {
+  try {
+    const r = await fetch('/api/camera/status');
+    const d = await r.json();
+    document.getElementById('cam-res').textContent =
+      d.width && d.height ? `${d.width} × ${d.height}` : '—';
+    document.getElementById('cam-fps').textContent = d.fps ? `${d.fps} fps` : '—';
+  } catch (_) {}
+}
+
+// ── Timelapse controls ────────────────────────────────────────────────────────
+let tlActive = false;
+
+async function startTimelapse() {
+  const name = document.getElementById('tl-name').value.trim() || 'timelapse';
+  const interval = parseInt(document.getElementById('tl-interval').value, 10) || 30;
+  const errEl = document.getElementById('start-error');
+  errEl.style.display = 'none';
+
+  document.getElementById('btn-start').disabled = true;
+  try {
+    const r = await fetch('/api/timelapse/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, interval_sec: interval }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Failed to start');
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.style.display = 'block';
+    document.getElementById('btn-start').disabled = false;
+    return;
+  }
+  await fetchTlStatus();
+}
+
+async function stopTimelapse() {
+  document.getElementById('btn-stop').disabled = true;
+  try {
+    await fetch('/api/timelapse/stop', { method: 'POST' });
+  } catch (_) {}
+  await fetchTlStatus();
+  document.getElementById('btn-stop').disabled = false;
+}
+
+function fmtElapsed(sec) {
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+
+async function fetchTlStatus() {
+  try {
+    const r = await fetch('/api/timelapse/status');
+    const d = await r.json();
+
+    const wasActive = tlActive;
+    tlActive = d.active;
+
+    const formCard = document.getElementById('tl-form-card');
+    const statusCard = document.getElementById('tl-status-card');
+
+    if (!d.active && !d.status) {
+      // nothing running
+      formCard.style.display = 'block';
+      statusCard.style.display = 'none';
+      document.getElementById('btn-start').disabled = false;
+      return;
+    }
+
+    // something active or recently finished
+    formCard.style.display = d.active ? 'none' : 'block';
+    statusCard.style.display = 'block';
+
+    document.getElementById('st-name').textContent = d.name || '—';
+    document.getElementById('st-frames').textContent = d.frame_count ?? 0;
+    document.getElementById('st-elapsed').textContent = fmtElapsed(d.elapsed_sec || 0);
+    document.getElementById('st-interval').textContent =
+      d.interval_sec ? `every ${d.interval_sec}s` : '—';
+
+    const badge = document.getElementById('st-badge');
+    const statusMap = {
+      running: ['badge-running', 'Running'],
+      compiling: ['badge-compiling', 'Compiling…'],
+      done: ['badge-done', 'Done'],
+      error: ['badge-error', 'Error'],
+    };
+    const [cls, label] = statusMap[d.status] || ['', d.status];
+    badge.innerHTML = `<span class="badge ${cls}">${label}</span>`;
+
+    document.getElementById('btn-stop').style.display = d.active ? 'block' : 'none';
+    document.getElementById('btn-start').disabled = d.active;
+
+    // refresh list when compilation finishes
+    if (wasActive && !d.active && d.status === 'done') {
+      fetchTimelapses();
+    }
+  } catch (_) {}
+}
+
+// ── Timelapse list ────────────────────────────────────────────────────────────
+async function fetchTimelapses() {
+  try {
+    const r = await fetch('/api/timelapses');
+    const list = await r.json();
+    renderTimelapses(list);
+  } catch (_) {}
+}
+
+function renderTimelapses(list) {
+  const grid = document.getElementById('tl-grid');
+  if (!list.length) {
+    grid.innerHTML = '<span class="empty-state">No timelapses yet.</span>';
+    return;
+  }
+
+  grid.innerHTML = list.map(t => {
+    const date = t.start_time
+      ? new Date(t.start_time * 1000).toLocaleString()
+      : '—';
+    const duration = t.end_time && t.start_time
+      ? fmtElapsed(Math.round(t.end_time - t.start_time))
+      : '—';
+    const frames = t.frame_count ?? 0;
+
+    let thumbHtml;
+    if (t.status === 'compiling') {
+      thumbHtml = `
+        <div class="tl-thumb-placeholder">
+          <div class="compiling-overlay">
+            <div class="spinner"></div>
+            Compiling…
+          </div>
+        </div>`;
+    } else if (t.has_thumbnail) {
+      thumbHtml = `
+        <img src="/api/timelapses/${encodeURIComponent(t.id)}/thumbnail"
+             alt="${escHtml(t.name)}" loading="lazy">
+        <div class="play-overlay"><div class="play-icon">&#9654;</div></div>`;
+    } else {
+      thumbHtml = `<div class="tl-thumb-placeholder">No preview</div>`;
+    }
+
+    const canPlay = t.has_video;
+    const canDownload = t.has_video;
+
+    return `
+      <div class="tl-card">
+        <div class="tl-thumb" ${canPlay ? `onclick="playVideo('${escAttr(t.id)}', '${escAttr(t.name)}')"` : ''}>
+          ${thumbHtml}
+        </div>
+        <div class="tl-info">
+          <div class="tl-name" title="${escAttr(t.name)}">${escHtml(t.name)}</div>
+          <div class="tl-meta">${date}</div>
+          <div class="tl-meta">${frames} frames · ${duration}</div>
+        </div>
+        <div class="tl-actions">
+          <button class="btn btn-ghost" onclick="playVideo('${escAttr(t.id)}', '${escAttr(t.name)}')"
+            ${canPlay ? '' : 'disabled'} title="Play">&#9654;</button>
+          <a href="/api/timelapses/${encodeURIComponent(t.id)}/video" download="${escAttr(t.name)}.mp4"
+             style="flex:1; text-decoration:none;">
+            <button class="btn btn-ghost" style="width:100%"
+              ${canDownload ? '' : 'disabled'} title="Download">&#8659;</button>
+          </a>
+          <button class="btn btn-ghost" onclick="deleteTl('${escAttr(t.id)}', '${escAttr(t.name)}')"
+            title="Delete" style="color:var(--red)">&#10005;</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function playVideo(id, name) {
+  const video = document.getElementById('modal-video');
+  video.src = `/api/timelapses/${encodeURIComponent(id)}/video`;
+  document.getElementById('modal-title').textContent = name;
+  document.getElementById('modal').classList.add('open');
+  video.play().catch(() => {});
+}
+
+function closeModal() {
+  const modal = document.getElementById('modal');
+  const video = document.getElementById('modal-video');
+  video.pause();
+  video.src = '';
+  modal.classList.remove('open');
+}
+
+async function deleteTl(id, name) {
+  if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+  try {
+    const r = await fetch(`/api/timelapses/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!r.ok) {
+      const d = await r.json();
+      alert(d.error || 'Delete failed');
+      return;
+    }
+    fetchTimelapses();
+  } catch (e) {
+    alert('Delete failed: ' + e.message);
+  }
+}
+
+// ── Escape helpers ────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+function escAttr(s) {
+  return String(s).replace(/'/g, "\\'").replace(/"/g, '\\"');
+}
+
+// ── Keyboard shortcut ─────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+});
+
+// ── Polling ───────────────────────────────────────────────────────────────────
+initStream();
+fetchCameraStatus();
+fetchTlStatus();
+fetchTimelapses();
+
+setInterval(fetchTlStatus, 2000);
+setInterval(fetchTimelapses, 6000);
+setInterval(fetchCameraStatus, 10000);
+</script>
+</body>
+</html>
