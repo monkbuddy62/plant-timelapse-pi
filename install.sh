@@ -8,6 +8,9 @@ echo "Cloning plant-timelapse-pi into $INSTALL_DIR..."
 git clone "$REPO" "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
+echo "Installing system dependencies..."
+sudo apt-get install -y python3-venv
+
 echo "Creating virtual environment..."
 python3 -m venv "$INSTALL_DIR/venv"
 "$INSTALL_DIR/venv/bin/pip" install -r requirements.txt
