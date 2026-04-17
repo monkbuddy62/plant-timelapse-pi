@@ -48,6 +48,14 @@ class TimelapseManager:
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
         self._seg_threads: list[threading.Thread] = []
+        # Offset between Pi system clock and browser clock (seconds).
+        # Written by status() each time the browser sends its timestamp;
+        # read by the capture loop so it uses wall-clock time even if the
+        # Pi's RTC/NTP is wrong.  Float assignment is atomic under the GIL.
+        self._clock_offset_sec: float = 0.0
+
+    def _corrected_utc_now(self) -> datetime:
+        return datetime.fromtimestamp(time.time() + self._clock_offset_sec, tz=timezone.utc)
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -186,7 +194,7 @@ class TimelapseManager:
 
         return asdict(session)
 
-    def status(self) -> dict:
+    def status(self, client_ts: float = 0.0) -> dict:
         with self._lock:
             if self._session is None:
                 return {"active": False}
@@ -215,6 +223,10 @@ class TimelapseManager:
                 "capture_alive": self._thread is not None and self._thread.is_alive(),
             }
 
+        # Calibrate clock offset from browser timestamp before any time-sensitive work.
+        if client_ts:
+            self._clock_offset_sec = client_ts - time.time()
+
         # Compute daylight window outside the lock so an astral exception
         # doesn't poison the status endpoint and leave the UI frozen.
         if result["daylight_only"] and result["status"] == "running":
@@ -224,10 +236,11 @@ class TimelapseManager:
                     result["sunrise_offset_min"], result["sunset_offset_min"],
                     result["tz_offset_min"],
                 )
-                now_utc = datetime.now(timezone.utc)
+                now_utc = self._corrected_utc_now()
                 result["daylight_paused"] = not (dl_start <= now_utc <= dl_end)
                 result["daylight_resume_ts"] = dl_start.timestamp()
                 result["daylight_pause_ts"] = dl_end.timestamp()
+                result["clock_offset_sec"] = round(self._clock_offset_sec)
             except Exception as exc:
                 result["daylight_error"] = str(exc)
 
@@ -332,7 +345,7 @@ class TimelapseManager:
                     except Exception:
                         # If astral fails, skip the window check and capture anyway
                         _dl_start = _dl_end = None
-                if _dl_start and _dl_end and not (_dl_start <= datetime.now(timezone.utc) <= _dl_end):
+                if _dl_start and _dl_end and not (_dl_start <= self._corrected_utc_now() <= _dl_end):
                     self._stop_event.wait(timeout=60)
                     continue
 

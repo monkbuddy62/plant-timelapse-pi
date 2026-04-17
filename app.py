@@ -15,7 +15,7 @@ from timelapse import TimelapseManager
 
 app = Flask(__name__)
 
-BUILD_ID = "5"
+BUILD_ID = "6"
 
 TIMELAPSES_DIR = Path(os.environ.get("TIMELAPSES_DIR", Path(__file__).parent / "timelapses"))
 TIMELAPSES_DIR.mkdir(exist_ok=True)
@@ -253,7 +253,8 @@ def timelapse_stop():
 
 @app.route("/api/timelapse/status")
 def timelapse_status():
-    return jsonify(tl.status())
+    client_ts = float(request.args.get("ts", 0) or 0)
+    return jsonify(tl.status(client_ts=client_ts))
 
 
 @app.route("/api/timelapses")

@@ -726,7 +726,7 @@ function fmtElapsed(sec) {
 
 async function fetchTlStatus() {
   try {
-    const r = await fetch('/api/timelapse/status');
+    const r = await fetch('/api/timelapse/status?ts=' + (Date.now() / 1000));
     const d = await r.json();
 
     const wasActive = tlActive;
@@ -789,6 +789,10 @@ async function fetchTlStatus() {
       threadRow.style.display = '';
       document.getElementById('st-thread').innerHTML =
         '<span style="color:var(--red)">Dead — restart service</span>';
+    } else if (d.clock_offset_sec && Math.abs(d.clock_offset_sec) > 60) {
+      threadRow.style.display = '';
+      document.getElementById('st-thread').innerHTML =
+        `<span style="color:var(--yellow)">Pi clock off by ${Math.round(d.clock_offset_sec / 3600)}h — auto-corrected</span>`;
     } else {
       threadRow.style.display = 'none';
     }
