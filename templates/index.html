@@ -480,6 +480,10 @@
         <span class="label">Daylight window</span>
         <span class="value" id="st-daylight">—</span>
       </div>
+      <div class="status-row" id="st-thread-row" style="display:none">
+        <span class="label">Capture thread</span>
+        <span class="value" id="st-thread">—</span>
+      </div>
       <br>
       <button class="btn btn-ghost" id="btn-watch-progress" onclick="watchProgress()"
               style="margin-bottom:8px; display:none">
@@ -763,15 +767,28 @@ async function fetchTlStatus() {
     const dlRow = document.getElementById('st-daylight-row');
     if (d.daylight_only) {
       dlRow.style.display = '';
-      const fmtTime = ts => new Date(ts * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
-      const resumeStr = d.daylight_resume_ts ? fmtTime(d.daylight_resume_ts) : '—';
-      const pauseStr  = d.daylight_pause_ts  ? fmtTime(d.daylight_pause_ts)  : '—';
-      const note = d.daylight_paused
-        ? `Resumes ${resumeStr} · Stops ${pauseStr}`
-        : `Active until ${pauseStr} · Resumes ${resumeStr} tomorrow`;
-      document.getElementById('st-daylight').textContent = note;
+      if (d.daylight_error) {
+        document.getElementById('st-daylight').textContent = `Error: ${d.daylight_error}`;
+      } else {
+        const fmtTime = ts => new Date(ts * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+        const resumeStr = d.daylight_resume_ts ? fmtTime(d.daylight_resume_ts) : '—';
+        const pauseStr  = d.daylight_pause_ts  ? fmtTime(d.daylight_pause_ts)  : '—';
+        const note = d.daylight_paused
+          ? `Resumes ${resumeStr} · Stops ${pauseStr}`
+          : `Active until ${pauseStr} · Resumes ${resumeStr} tomorrow`;
+        document.getElementById('st-daylight').textContent = note;
+      }
     } else {
       dlRow.style.display = 'none';
+    }
+
+    const threadRow = document.getElementById('st-thread-row');
+    if (d.active && d.capture_alive === false) {
+      threadRow.style.display = '';
+      document.getElementById('st-thread').innerHTML =
+        '<span style="color:var(--red)">Dead — restart service</span>';
+    } else {
+      threadRow.style.display = 'none';
     }
 
     const watchBtn = document.getElementById('btn-watch-progress');

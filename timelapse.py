@@ -181,16 +181,25 @@ class TimelapseManager:
                 "longitude": s.longitude,
                 "sunrise_offset_min": s.sunrise_offset_min,
                 "sunset_offset_min": s.sunset_offset_min,
+                "capture_alive": self._thread is not None and self._thread.is_alive(),
             }
-            if s.daylight_only and s.status == "running":
+
+        # Compute daylight window outside the lock so an astral exception
+        # doesn't poison the status endpoint and leave the UI frozen.
+        if result["daylight_only"] and result["status"] == "running":
+            try:
                 dl_start, dl_end = _daylight_window(
-                    s.latitude, s.longitude, s.sunrise_offset_min, s.sunset_offset_min
+                    result["latitude"], result["longitude"],
+                    result["sunrise_offset_min"], result["sunset_offset_min"],
                 )
                 now_utc = datetime.now(timezone.utc)
                 result["daylight_paused"] = not (dl_start <= now_utc <= dl_end)
                 result["daylight_resume_ts"] = dl_start.timestamp()
                 result["daylight_pause_ts"] = dl_end.timestamp()
-            return result
+            except Exception as exc:
+                result["daylight_error"] = str(exc)
+
+        return result
 
     def list_timelapses(self) -> list:
         results = []
@@ -280,11 +289,15 @@ class TimelapseManager:
             if daylight_only:
                 today = date.today()
                 if today != _dl_date:
-                    _dl_start, _dl_end = _daylight_window(
-                        latitude, longitude, sunrise_offset_min, sunset_offset_min
-                    )
-                    _dl_date = today
-                if not (_dl_start <= datetime.now(timezone.utc) <= _dl_end):
+                    try:
+                        _dl_start, _dl_end = _daylight_window(
+                            latitude, longitude, sunrise_offset_min, sunset_offset_min
+                        )
+                        _dl_date = today
+                    except Exception:
+                        # If astral fails, skip the window check and capture anyway
+                        _dl_start = _dl_end = None
+                if _dl_start and _dl_end and not (_dl_start <= datetime.now(timezone.utc) <= _dl_end):
                     self._stop_event.wait(timeout=60)
                     continue
 
