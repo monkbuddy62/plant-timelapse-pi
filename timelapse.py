@@ -472,16 +472,19 @@ def _avg_brightness(jpeg_bytes: bytes) -> float:
 
 def _daylight_window(lat: float, lon: float, rise_offset_min: int, set_offset_min: int,
                      tz_offset_min: int = 0):
-    """Return (start_utc, end_utc) for today's capture window.
+    """Return (start, end) tz-aware datetimes for today's capture window.
 
-    Uses tz_offset_min (browser UTC offset, e.g. -420 for PDT) to derive
-    the user's local calendar date. This makes the window correct regardless
-    of what timezone the Pi's OS is set to.
+    Must pass tzinfo to astral_sun so it finds the sunrise/sunset that the
+    user sees on their local calendar day. Without it, astral uses the UTC
+    calendar day, which gives the wrong sunset for timezones behind UTC
+    (e.g. PDT: April 17 sunset is 8 PM PDT = 03:07 UTC April 18, but
+    astral without tzinfo returns the April 16 PDT sunset instead because
+    that's the one that falls on UTC April 17).
     """
     user_tz = timezone(timedelta(minutes=tz_offset_min))
     local_date = datetime.now(user_tz).date()
     loc = LocationInfo(latitude=lat, longitude=lon)
-    s = astral_sun(loc.observer, date=local_date)
+    s = astral_sun(loc.observer, date=local_date, tzinfo=user_tz)
     start = s["sunrise"] + timedelta(minutes=rise_offset_min)
     end = s["sunset"] - timedelta(minutes=set_offset_min)
     return start, end
