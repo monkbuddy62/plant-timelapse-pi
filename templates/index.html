@@ -346,6 +346,35 @@
     font-size: 13px;
     padding: 24px 0;
   }
+
+  /* ── Daylight forecast popup ── */
+  .dl-popup {
+    position: fixed;
+    background: var(--card2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    font-size: 11px;
+    z-index: 200;
+    min-width: 210px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.7);
+    display: none;
+  }
+  .dl-popup.open { display: block; }
+  .dl-popup-title {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted);
+    margin-bottom: 7px;
+  }
+  .dl-popup table { border-collapse: collapse; width: 100%; }
+  .dl-popup td { padding: 3px 6px; }
+  .dl-popup tr:not(:last-child) td { border-bottom: 1px solid var(--border); }
+  .dl-popup .pcol-day { color: var(--muted); white-space: nowrap; }
+  .dl-popup .pcol-day.today { color: var(--text); font-weight: 600; }
+  .dl-popup .pcol-range { color: var(--text); text-align: right; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -483,7 +512,10 @@
       </div>
       <div class="status-row" id="st-daylight-row" style="display:none">
         <span class="label">Daylight window</span>
-        <span class="value" id="st-daylight">—</span>
+        <span class="value" id="st-daylight"
+              style="cursor:pointer; text-decoration:underline dotted var(--muted); text-underline-offset:2px"
+              title="Tap for 7-day forecast"
+              onclick="toggleDaylightPopover(event)">—</span>
       </div>
       <div class="status-row" id="st-thread-row" style="display:none">
         <span class="label">Capture thread</span>
@@ -589,6 +621,9 @@
   </div>
 </div>
 
+<!-- Daylight forecast popup -->
+<div id="dl-popup" class="dl-popup"></div>
+
 <!-- Video modal -->
 <div id="modal">
   <div class="modal-backdrop" onclick="closeModal()"></div>
@@ -622,6 +657,89 @@ function saveLocation() {
   if (lat) localStorage.setItem('tl_lat', lat);
   if (lon) localStorage.setItem('tl_lon', lon);
 }
+
+// ── Daylight forecast popup ───────────────────────────────────────────────────
+let _dlConfig = null;
+
+// NOAA sunrise equation — returns {rise, set} as UTC Date objects, or null for polar extremes.
+function _sunTimes(refUtcDate, lat, lon) {
+  const rad = x => x * Math.PI / 180;
+  const deg = x => x * 180 / Math.PI;
+  const JD = refUtcDate.getTime() / 86400000 + 2440587.5;
+  const n = Math.floor(JD - 2451545.0 + 0.5);
+  const Jstar = n - lon / 360;
+  const M = ((357.5291 + 0.98560028 * Jstar) % 360 + 360) % 360;
+  const C = 1.9148 * Math.sin(rad(M)) + 0.0200 * Math.sin(rad(2*M)) + 0.0003 * Math.sin(rad(3*M));
+  const lambda = ((M + C + 180 + 102.9372) % 360 + 360) % 360;
+  const Jtransit = 2451545.0 + Jstar + 0.0053 * Math.sin(rad(M)) - 0.0069 * Math.sin(rad(2*lambda));
+  const sinDec = Math.sin(rad(lambda)) * Math.sin(rad(23.4397));
+  const cosH = (Math.sin(rad(-0.8333)) - Math.sin(rad(lat)) * sinDec) /
+               (Math.cos(rad(lat)) * Math.cos(Math.asin(sinDec)));
+  if (cosH < -1 || cosH > 1) return null;
+  const H = deg(Math.acos(cosH));
+  const toDate = jd => new Date((jd - 2440587.5) * 86400000);
+  return { rise: toDate(Jtransit - H / 360), set: toDate(Jtransit + H / 360) };
+}
+
+function toggleDaylightPopover(e) {
+  e.stopPropagation();
+  const popup = document.getElementById('dl-popup');
+  if (popup.classList.contains('open')) {
+    popup.classList.remove('open');
+    return;
+  }
+  if (!_dlConfig) return;
+
+  const { lat, lon, riseOffset, setOffset, tzOffset } = _dlConfig;
+
+  const fmtLocalTime = utcMs => {
+    const d = new Date(utcMs + tzOffset * 60000);
+    const h = d.getUTCHours(), m = d.getUTCMinutes();
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    return `${h % 12 || 12}:${String(m).padStart(2,'0')} ${ampm}`;
+  };
+
+  // Determine start of today in user's local timezone
+  const localNowMs = Date.now() + tzOffset * 60000;
+  const localMidnightMs = localNowMs - (localNowMs % 86400000);
+
+  const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const MON_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  let rows = '';
+  for (let i = 0; i < 7; i++) {
+    const localNoonMs = localMidnightMs + i * 86400000 + 12 * 3600000;
+    const refDate = new Date(localNoonMs - tzOffset * 60000); // back to real UTC
+    const d = new Date(localNoonMs); // fake-UTC for day label
+    const dayLabel = i === 0 ? 'Today' : `${DAY_NAMES[d.getUTCDay()]} ${MON_NAMES[d.getUTCMonth()]} ${d.getUTCDate()}`;
+    const dayClass = i === 0 ? 'pcol-day today' : 'pcol-day';
+    const st = _sunTimes(refDate, lat, lon);
+    let range;
+    if (!st) {
+      range = '<span style="color:var(--muted)">No sun</span>';
+    } else {
+      const start = fmtLocalTime(st.rise.getTime() + riseOffset * 60000);
+      const end   = fmtLocalTime(st.set.getTime()  - setOffset  * 60000);
+      range = `${start} – ${end}`;
+    }
+    rows += `<tr><td class="${dayClass}">${dayLabel}</td><td class="pcol-range">${range}</td></tr>`;
+  }
+
+  popup.innerHTML = `<div class="dl-popup-title">7-Day Capture Windows</div><table>${rows}</table>`;
+  popup.classList.add('open');
+
+  const anchor = e.target.closest('.status-row').getBoundingClientRect();
+  const pw = 220;
+  let left = anchor.left;
+  if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
+  popup.style.top  = (anchor.bottom + 4) + 'px';
+  popup.style.left = left + 'px';
+}
+
+document.addEventListener('click', () => {
+  const popup = document.getElementById('dl-popup');
+  if (popup) popup.classList.remove('open');
+});
 
 // ── Stream ────────────────────────────────────────────────────────────────────
 let streamReady = false;
@@ -784,8 +902,15 @@ async function fetchTlStatus() {
     if (d.daylight_only) {
       dlRow.style.display = '';
       if (d.daylight_error) {
+        _dlConfig = null;
         document.getElementById('st-daylight').textContent = `Error: ${d.daylight_error}`;
       } else {
+        _dlConfig = {
+          lat: d.latitude, lon: d.longitude,
+          riseOffset: d.sunrise_offset_min ?? 0,
+          setOffset:  d.sunset_offset_min  ?? 0,
+          tzOffset:   d.tz_offset_min       ?? 0,
+        };
         const fmtTime = ts => new Date(ts * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
         const resumeStr = d.daylight_resume_ts ? fmtTime(d.daylight_resume_ts) : '—';
         const pauseStr  = d.daylight_pause_ts  ? fmtTime(d.daylight_pause_ts)  : '—';
@@ -795,6 +920,7 @@ async function fetchTlStatus() {
         document.getElementById('st-daylight').textContent = note;
       }
     } else {
+      _dlConfig = null;
       dlRow.style.display = 'none';
     }
 
