@@ -402,6 +402,10 @@
 
     <div class="card">
       <h2>Image Controls</h2>
+      <button class="btn btn-ghost" onclick="resetAllControls()"
+              style="margin-bottom:12px; border-color:#555; font-size:12px;">
+        &#8635; Reset All to Defaults
+      </button>
       <div class="field">
         <label>White Balance</label>
         <select id="ctrl-awb" onchange="onAwbModeChange()">
@@ -1231,6 +1235,29 @@ async function calibrateWB() {
 async function resetToAutoWB() {
   _setGainsActive(false);
   applyControls();
+}
+
+async function resetAllControls() {
+  document.getElementById('ctrl-brightness').value = 0;
+  document.getElementById('ctrl-contrast').value   = 1;
+  document.getElementById('ctrl-saturation').value = 1;
+  document.getElementById('ctrl-sharpness').value  = 1;
+  syncLabel('ctrl-brightness', 'lbl-brightness', 1);
+  syncLabel('ctrl-contrast',   'lbl-contrast',   1);
+  syncLabel('ctrl-saturation', 'lbl-saturation', 1);
+  syncLabel('ctrl-sharpness',  'lbl-sharpness',  1);
+  _setGainsActive(false);
+  document.getElementById('ctrl-awb').value = 0;
+  try {
+    await fetch('/api/camera/controls', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        Brightness: 0, Contrast: 1, Saturation: 1, Sharpness: 1,
+        AwbMode: 0, ColourGainR: 0, ColourGainB: 0,
+      }),
+    });
+  } catch (_) {}
 }
 
 async function fetchCameraControls() {
