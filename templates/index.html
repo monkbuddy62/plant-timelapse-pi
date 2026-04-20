@@ -399,6 +399,63 @@
 
   <!-- Controls -->
   <div class="controls-panel">
+
+    <div class="card">
+      <h2>Image Controls</h2>
+      <div class="field">
+        <label>White Balance</label>
+        <select id="ctrl-awb" onchange="onAwbModeChange()">
+          <option value="0">Auto</option>
+          <option value="1">Tungsten</option>
+          <option value="2">Fluorescent</option>
+          <option value="3">Indoor</option>
+          <option value="4">Daylight</option>
+          <option value="5">Cloudy</option>
+        </select>
+      </div>
+      <div id="gains-section" style="background:var(--card2); border:1px solid var(--border); border-radius:6px; padding:10px 12px; margin-bottom:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px">Manual Colour Gains</span>
+          <div style="display:flex; gap:6px;">
+            <button class="btn btn-ghost" id="btn-calibrate-wb" onclick="calibrateWB()"
+                    style="padding:3px 8px; font-size:11px; width:auto;">Auto-lock WB</button>
+            <button class="btn btn-ghost" id="btn-reset-wb" onclick="resetToAutoWB()"
+                    style="padding:3px 8px; font-size:11px; width:auto; display:none;">Reset Auto</button>
+          </div>
+        </div>
+        <div class="field" style="margin-bottom:8px;">
+          <div class="ctrl-label-row"><span>Red Gain</span><span id="lbl-gain-r">—</span></div>
+          <input type="range" id="ctrl-gain-r" min="0.5" max="4" step="0.05" value="2"
+                 oninput="syncGainLabel('r'); applyControls()" disabled>
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <div class="ctrl-label-row"><span>Blue Gain</span><span id="lbl-gain-b">—</span></div>
+          <input type="range" id="ctrl-gain-b" min="0.5" max="4" step="0.05" value="2"
+                 oninput="syncGainLabel('b'); applyControls()" disabled>
+        </div>
+      </div>
+      <div class="field">
+        <div class="ctrl-label-row"><span>Brightness</span><span id="lbl-brightness">0.0</span></div>
+        <input type="range" id="ctrl-brightness" min="-1" max="1" step="0.1" value="0"
+               oninput="syncLabel('ctrl-brightness','lbl-brightness',1); applyControls()">
+      </div>
+      <div class="field">
+        <div class="ctrl-label-row"><span>Contrast</span><span id="lbl-contrast">1.0</span></div>
+        <input type="range" id="ctrl-contrast" min="0" max="4" step="0.1" value="1"
+               oninput="syncLabel('ctrl-contrast','lbl-contrast',1); applyControls()">
+      </div>
+      <div class="field">
+        <div class="ctrl-label-row"><span>Saturation</span><span id="lbl-saturation">1.0</span></div>
+        <input type="range" id="ctrl-saturation" min="0" max="4" step="0.1" value="1"
+               oninput="syncLabel('ctrl-saturation','lbl-saturation',1); applyControls()">
+      </div>
+      <div class="field">
+        <div class="ctrl-label-row"><span>Sharpness</span><span id="lbl-sharpness">1.0</span></div>
+        <input type="range" id="ctrl-sharpness" min="0" max="4" step="0.1" value="1"
+               oninput="syncLabel('ctrl-sharpness','lbl-sharpness',1); applyControls()">
+      </div>
+    </div>
+
     <div class="card" id="tl-form-card">
       <h2>New Timelapse</h2>
 
@@ -540,41 +597,6 @@
       <div class="status-row">
         <span class="label">Stream FPS</span>
         <span class="value" id="cam-fps">—</span>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Image Controls</h2>
-      <div class="field">
-        <label>White Balance</label>
-        <select id="ctrl-awb" onchange="applyControls()">
-          <option value="0">Auto</option>
-          <option value="1">Tungsten</option>
-          <option value="2">Fluorescent</option>
-          <option value="3">Indoor</option>
-          <option value="4">Daylight</option>
-          <option value="5">Cloudy</option>
-        </select>
-      </div>
-      <div class="field">
-        <div class="ctrl-label-row"><span>Brightness</span><span id="lbl-brightness">0.0</span></div>
-        <input type="range" id="ctrl-brightness" min="-1" max="1" step="0.1" value="0"
-               oninput="syncLabel('ctrl-brightness','lbl-brightness',1); applyControls()">
-      </div>
-      <div class="field">
-        <div class="ctrl-label-row"><span>Contrast</span><span id="lbl-contrast">1.0</span></div>
-        <input type="range" id="ctrl-contrast" min="0" max="4" step="0.1" value="1"
-               oninput="syncLabel('ctrl-contrast','lbl-contrast',1); applyControls()">
-      </div>
-      <div class="field">
-        <div class="ctrl-label-row"><span>Saturation</span><span id="lbl-saturation">1.0</span></div>
-        <input type="range" id="ctrl-saturation" min="0" max="4" step="0.1" value="1"
-               oninput="syncLabel('ctrl-saturation','lbl-saturation',1); applyControls()">
-      </div>
-      <div class="field">
-        <div class="ctrl-label-row"><span>Sharpness</span><span id="lbl-sharpness">1.0</span></div>
-        <input type="range" id="ctrl-sharpness" min="0" max="4" step="0.1" value="1"
-               oninput="syncLabel('ctrl-sharpness','lbl-sharpness',1); applyControls()">
       </div>
     </div>
 
@@ -1123,6 +1145,40 @@ function syncLabel(sliderId, labelId, decimals) {
     parseFloat(document.getElementById(sliderId).value).toFixed(decimals);
 }
 
+function syncGainLabel(channel) {
+  const id = channel === 'r' ? 'ctrl-gain-r' : 'ctrl-gain-b';
+  const lbl = channel === 'r' ? 'lbl-gain-r' : 'lbl-gain-b';
+  document.getElementById(lbl).textContent =
+    parseFloat(document.getElementById(id).value).toFixed(2);
+}
+
+function _gainsActive() {
+  return !document.getElementById('ctrl-gain-r').disabled;
+}
+
+function _setGainsActive(active) {
+  const rSlider = document.getElementById('ctrl-gain-r');
+  const bSlider = document.getElementById('ctrl-gain-b');
+  const resetBtn = document.getElementById('btn-reset-wb');
+  const awbSel = document.getElementById('ctrl-awb');
+  rSlider.disabled = !active;
+  bSlider.disabled = !active;
+  resetBtn.style.display = active ? 'inline-block' : 'none';
+  awbSel.disabled = active;
+  awbSel.style.opacity = active ? '0.4' : '';
+  if (!active) {
+    document.getElementById('lbl-gain-r').textContent = '—';
+    document.getElementById('lbl-gain-b').textContent = '—';
+  }
+}
+
+function onAwbModeChange() {
+  if (_gainsActive()) {
+    _setGainsActive(false);
+  }
+  applyControls();
+}
+
 let _ctrlDebounce = null;
 function applyControls() {
   clearTimeout(_ctrlDebounce);
@@ -1132,8 +1188,15 @@ function applyControls() {
       Contrast:   parseFloat(document.getElementById('ctrl-contrast').value),
       Saturation: parseFloat(document.getElementById('ctrl-saturation').value),
       Sharpness:  parseFloat(document.getElementById('ctrl-sharpness').value),
-      AwbMode:    parseInt(document.getElementById('ctrl-awb').value, 10),
     };
+    if (_gainsActive()) {
+      controls.ColourGainR = parseFloat(document.getElementById('ctrl-gain-r').value);
+      controls.ColourGainB = parseFloat(document.getElementById('ctrl-gain-b').value);
+    } else {
+      controls.AwbMode = parseInt(document.getElementById('ctrl-awb').value, 10);
+      controls.ColourGainR = 0;
+      controls.ColourGainB = 0;
+    }
     try {
       await fetch('/api/camera/controls', {
         method: 'POST',
@@ -1142,6 +1205,32 @@ function applyControls() {
       });
     } catch (_) {}
   }, 350);
+}
+
+async function calibrateWB() {
+  const btn = document.getElementById('btn-calibrate-wb');
+  btn.disabled = true;
+  btn.textContent = 'Sampling…';
+  try {
+    const r = await fetch('/api/camera/calibrate_wb', { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok) { alert(d.error || 'Calibration failed'); return; }
+    document.getElementById('ctrl-gain-r').value = d.r_gain;
+    document.getElementById('ctrl-gain-b').value = d.b_gain;
+    _setGainsActive(true);
+    syncGainLabel('r');
+    syncGainLabel('b');
+  } catch (e) {
+    alert('Calibration failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Auto-lock WB';
+  }
+}
+
+async function resetToAutoWB() {
+  _setGainsActive(false);
+  applyControls();
 }
 
 async function fetchCameraControls() {
@@ -1164,7 +1253,13 @@ async function fetchCameraControls() {
       document.getElementById('ctrl-sharpness').value = d.Sharpness;
       syncLabel('ctrl-sharpness', 'lbl-sharpness', 1);
     }
-    if ('AwbMode' in d) {
+    if (d.ColourGainR > 0 && d.ColourGainB > 0) {
+      document.getElementById('ctrl-gain-r').value = d.ColourGainR;
+      document.getElementById('ctrl-gain-b').value = d.ColourGainB;
+      _setGainsActive(true);
+      syncGainLabel('r');
+      syncGainLabel('b');
+    } else if ('AwbMode' in d) {
       document.getElementById('ctrl-awb').value = d.AwbMode;
     }
   } catch (_) {}

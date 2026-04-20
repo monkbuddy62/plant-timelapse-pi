@@ -15,7 +15,7 @@ from timelapse import TimelapseManager
 
 app = Flask(__name__)
 
-BUILD_ID = "11"
+BUILD_ID = "12"
 
 TIMELAPSES_DIR = Path(os.environ.get("TIMELAPSES_DIR", Path(__file__).parent / "timelapses"))
 TIMELAPSES_DIR.mkdir(exist_ok=True)
@@ -43,7 +43,17 @@ def update_camera_controls(controls: dict):
     with _picam2_lock:
         if _picam2_ref is not None:
             try:
-                _picam2_ref.set_controls(controls)
+                cam = {k: v for k, v in controls.items()
+                       if k not in ("ColourGainR", "ColourGainB", "AwbMode")}
+                r = controls.get("ColourGainR", 0)
+                b = controls.get("ColourGainB", 0)
+                if r and b:
+                    cam["AwbEnable"] = False
+                    cam["ColourGains"] = (float(r), float(b))
+                else:
+                    cam["AwbEnable"] = True
+                    cam["AwbMode"] = controls.get("AwbMode", 0)
+                _picam2_ref.set_controls(cam)
             except Exception as exc:
                 app.logger.warning("set_controls failed: %s", exc)
 
@@ -359,8 +369,44 @@ def set_camera_controls():
         awb = int(data["AwbMode"])
         if 0 <= awb <= 5:
             controls["AwbMode"] = awb
+    if "ColourGainR" in data:
+        controls["ColourGainR"] = max(0.0, min(8.0, float(data["ColourGainR"])))
+    if "ColourGainB" in data:
+        controls["ColourGainB"] = max(0.0, min(8.0, float(data["ColourGainB"])))
     update_camera_controls(controls)
     return jsonify({"ok": True, "controls": controls})
+
+
+@app.route("/api/camera/calibrate_wb", methods=["POST"])
+def calibrate_wb():
+    with _picam2_lock:
+        if _picam2_ref is None:
+            return jsonify({"error": "Camera not ready"}), 503
+        try:
+            _picam2_ref.set_controls({"AwbEnable": True, "AwbMode": 0})
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+
+    time.sleep(2.0)  # let AWB settle on the scene
+
+    with _picam2_lock:
+        if _picam2_ref is None:
+            return jsonify({"error": "Camera disconnected"}), 503
+        try:
+            metadata = _picam2_ref.capture_metadata()
+            gains = metadata.get("ColourGains")
+            if not gains or len(gains) < 2:
+                return jsonify({"error": "Camera did not report ColourGains"}), 500
+            r_gain = round(float(gains[0]), 3)
+            b_gain = round(float(gains[1]), 3)
+            _picam2_ref.set_controls({"AwbEnable": False, "ColourGains": (r_gain, b_gain)})
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+
+    _cam_controls["ColourGainR"] = r_gain
+    _cam_controls["ColourGainB"] = b_gain
+    _cam_controls.pop("AwbMode", None)
+    return jsonify({"ok": True, "r_gain": r_gain, "b_gain": b_gain})
 
 
 # ── Schedule routes ────────────────────────────────────────────────────────────
