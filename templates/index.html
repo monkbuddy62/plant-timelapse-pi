@@ -642,9 +642,27 @@
       <h2>Camera</h2>
       <div class="status-row">
         <span class="label">Resolution</span>
-        <span class="value" id="cam-res">—</span>
+        <span class="value" id="cam-res"
+              style="cursor:pointer; text-decoration:underline dotted var(--muted); text-underline-offset:2px"
+              title="Click to change" onclick="toggleResEdit()">—</span>
       </div>
-      <div class="status-row">
+      <div id="res-edit" style="display:none; margin-top:10px;">
+        <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
+          <input type="number" id="res-w" value="1280" min="160" max="4056" step="2"
+                 style="width:68px; background:var(--card2); border:1px solid var(--border); color:var(--text); border-radius:4px; padding:5px 6px; font-size:13px;">
+          <span style="color:var(--muted)">×</span>
+          <input type="number" id="res-h" value="720" min="120" max="3040" step="2"
+                 style="width:68px; background:var(--card2); border:1px solid var(--border); color:var(--text); border-radius:4px; padding:5px 6px; font-size:13px;">
+          <button class="btn btn-green" onclick="applyResolution()"
+                  style="flex:1; padding:6px 8px; font-size:12px;">Apply</button>
+        </div>
+        <div style="display:flex; gap:4px; flex-wrap:wrap;">
+          <button class="btn btn-ghost" onclick="setRes(640,480)"   style="flex:1; padding:4px 6px; font-size:11px;">640×480</button>
+          <button class="btn btn-ghost" onclick="setRes(1280,720)"  style="flex:1; padding:4px 6px; font-size:11px;">1280×720</button>
+          <button class="btn btn-ghost" onclick="setRes(1920,1080)" style="flex:1; padding:4px 6px; font-size:11px;">1920×1080</button>
+        </div>
+      </div>
+      <div class="status-row" style="margin-top:8px;">
         <span class="label">Stream FPS</span>
         <span class="value" id="cam-fps">—</span>
       </div>
@@ -849,6 +867,36 @@ async function fetchCameraStatus() {
       d.width && d.height ? `${d.width} × ${d.height}` : '—';
     document.getElementById('cam-fps').textContent = d.fps ? `${d.fps} fps` : '—';
   } catch (_) {}
+}
+
+// ── Resolution change ─────────────────────────────────────────────────────────
+function toggleResEdit() {
+  const el = document.getElementById('res-edit');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function setRes(w, h) {
+  document.getElementById('res-w').value = w;
+  document.getElementById('res-h').value = h;
+}
+
+async function applyResolution() {
+  const w = parseInt(document.getElementById('res-w').value, 10);
+  const h = parseInt(document.getElementById('res-h').value, 10);
+  const btn = document.querySelector('#res-edit .btn-green');
+  btn.disabled = true;
+  btn.textContent = 'Restarting…';
+  try {
+    await fetch('/api/camera/resolution', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ width: w, height: h }),
+    });
+    document.getElementById('res-edit').style.display = 'none';
+    document.getElementById('cam-res').textContent = `${w} × ${h}`;
+  } catch (_) {}
+  btn.disabled = false;
+  btn.textContent = 'Apply';
 }
 
 // ── Timelapse controls ────────────────────────────────────────────────────────

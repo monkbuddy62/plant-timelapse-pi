@@ -15,7 +15,7 @@ from timelapse import TimelapseManager
 
 app = Flask(__name__)
 
-BUILD_ID = "14"
+BUILD_ID = "15"
 
 TIMELAPSES_DIR = Path(os.environ.get("TIMELAPSES_DIR", Path(__file__).parent / "timelapses"))
 TIMELAPSES_DIR.mkdir(exist_ok=True)
@@ -125,6 +125,14 @@ def stop_camera():
 
 
 atexit.register(stop_camera)
+
+
+def restart_camera(width: int, height: int):
+    global STREAM_WIDTH, STREAM_HEIGHT
+    stop_camera()
+    STREAM_WIDTH = width
+    STREAM_HEIGHT = height
+    start_camera()
 
 # ── Timelapse manager ──────────────────────────────────────────────────────────
 tl = TimelapseManager(TIMELAPSES_DIR, get_frame)
@@ -348,6 +356,18 @@ def delete_timelapse(tl_id: str):
 
 
 # ── Camera controls routes ─────────────────────────────────────────────────────
+@app.route("/api/camera/resolution", methods=["POST"])
+def set_resolution():
+    data = request.get_json(silent=True) or {}
+    try:
+        w = max(160, min(4056, int(data.get("width", STREAM_WIDTH))))
+        h = max(120, min(3040, int(data.get("height", STREAM_HEIGHT))))
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid dimensions"}), 400
+    threading.Thread(target=restart_camera, args=(w, h), daemon=True, name="cam-restart").start()
+    return jsonify({"ok": True, "width": w, "height": h})
+
+
 @app.route("/api/camera/controls", methods=["GET"])
 def get_camera_controls():
     return jsonify(_cam_controls)
