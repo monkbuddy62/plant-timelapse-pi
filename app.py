@@ -15,7 +15,7 @@ from timelapse import TimelapseManager
 
 app = Flask(__name__)
 
-BUILD_ID = "15"
+BUILD_ID = "16"
 
 TIMELAPSES_DIR = Path(os.environ.get("TIMELAPSES_DIR", Path(__file__).parent / "timelapses"))
 TIMELAPSES_DIR.mkdir(exist_ok=True)
@@ -43,8 +43,8 @@ def update_camera_controls(controls: dict):
     with _picam2_lock:
         if _picam2_ref is not None:
             try:
-                cam = {k: v for k, v in controls.items()
-                       if k not in ("ColourGainR", "ColourGainB", "AwbMode")}
+                skip = {"ColourGainR", "ColourGainB", "AwbMode", "AnalogueGain"}
+                cam = {k: v for k, v in controls.items() if k not in skip}
                 r = controls.get("ColourGainR", 0)
                 b = controls.get("ColourGainB", 0)
                 if r and b:
@@ -53,6 +53,12 @@ def update_camera_controls(controls: dict):
                 else:
                     cam["AwbEnable"] = True
                     cam["AwbMode"] = controls.get("AwbMode", 0)
+                ag = controls.get("AnalogueGain", 0)
+                if ag > 0:
+                    cam["AnalogueGain"] = float(ag)
+                    cam["AeEnable"] = False
+                else:
+                    cam["AeEnable"] = True
                 _picam2_ref.set_controls(cam)
             except Exception as exc:
                 app.logger.warning("set_controls failed: %s", exc)
@@ -393,6 +399,15 @@ def set_camera_controls():
         controls["ColourGainR"] = max(0.0, min(8.0, float(data["ColourGainR"])))
     if "ColourGainB" in data:
         controls["ColourGainB"] = max(0.0, min(8.0, float(data["ColourGainB"])))
+    if "ExposureValue" in data:
+        controls["ExposureValue"] = max(-8.0, min(8.0, float(data["ExposureValue"])))
+    if "AnalogueGain" in data:
+        ag = max(0.0, min(16.0, float(data["AnalogueGain"])))
+        controls["AnalogueGain"] = ag  # 0 means let AE handle it
+    if "AeConstraintMode" in data:
+        ae = int(data["AeConstraintMode"])
+        if 0 <= ae <= 2:
+            controls["AeConstraintMode"] = ae
     update_camera_controls(controls)
     return jsonify({"ok": True, "controls": controls})
 

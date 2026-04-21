@@ -504,6 +504,35 @@
         <input type="range" id="ctrl-sharpness" min="0" max="4" step="0.05" value="1"
                oninput="syncLabel('ctrl-sharpness','lbl-sharpness',2); applyControls()">
       </div>
+      <div class="field">
+        <div class="ctrl-label-row">
+          <span>EV Compensation</span>
+          <input type="number" class="ctrl-num-input" id="lbl-ev" value="0.00"
+                 min="-4" max="4" step="0.1"
+                 oninput="syncSliderFromInput('ctrl-ev','lbl-ev'); applyControls()">
+        </div>
+        <input type="range" id="ctrl-ev" min="-4" max="4" step="0.1" value="0"
+               oninput="syncLabel('ctrl-ev','lbl-ev',1); applyControls()">
+      </div>
+      <div class="field">
+        <div class="ctrl-label-row">
+          <span>Analogue Gain</span>
+          <input type="number" class="ctrl-num-input" id="lbl-again" value="0.00"
+                 min="0" max="16" step="0.1"
+                 oninput="syncSliderFromInput('ctrl-again','lbl-again'); applyControls()">
+        </div>
+        <input type="range" id="ctrl-again" min="0" max="16" step="0.1" value="0"
+               oninput="syncLabel('ctrl-again','lbl-again',1); applyControls()">
+        <div style="font-size:10px; color:var(--muted); margin-top:2px;">0 = auto</div>
+      </div>
+      <div class="field">
+        <label>AE Metering</label>
+        <select id="ctrl-ae-mode" onchange="applyControls()">
+          <option value="0">Normal</option>
+          <option value="1">Highlight (prevent blowout)</option>
+          <option value="2">Shadows (lift darks)</option>
+        </select>
+      </div>
     </div>
 
     <div class="card" id="tl-form-card">
@@ -1291,10 +1320,13 @@ function applyControls() {
   clearTimeout(_ctrlDebounce);
   _ctrlDebounce = setTimeout(async () => {
     const controls = {
-      Brightness: parseFloat(document.getElementById('ctrl-brightness').value),
-      Contrast:   parseFloat(document.getElementById('ctrl-contrast').value),
-      Saturation: parseFloat(document.getElementById('ctrl-saturation').value),
-      Sharpness:  parseFloat(document.getElementById('ctrl-sharpness').value),
+      Brightness:    parseFloat(document.getElementById('ctrl-brightness').value),
+      Contrast:      parseFloat(document.getElementById('ctrl-contrast').value),
+      Saturation:    parseFloat(document.getElementById('ctrl-saturation').value),
+      Sharpness:     parseFloat(document.getElementById('ctrl-sharpness').value),
+      ExposureValue: parseFloat(document.getElementById('ctrl-ev').value),
+      AnalogueGain:  parseFloat(document.getElementById('ctrl-again').value),
+      AeConstraintMode: parseInt(document.getElementById('ctrl-ae-mode').value, 10),
     };
     if (_gainsActive()) {
       controls.ColourGainR = parseFloat(document.getElementById('ctrl-gain-r').value);
@@ -1345,10 +1377,15 @@ async function resetAllControls() {
   document.getElementById('ctrl-contrast').value   = 1;
   document.getElementById('ctrl-saturation').value = 1;
   document.getElementById('ctrl-sharpness').value  = 1;
-  syncLabel('ctrl-brightness', 'lbl-brightness', 1);
-  syncLabel('ctrl-contrast',   'lbl-contrast',   1);
-  syncLabel('ctrl-saturation', 'lbl-saturation', 1);
-  syncLabel('ctrl-sharpness',  'lbl-sharpness',  1);
+  document.getElementById('ctrl-ev').value         = 0;
+  document.getElementById('ctrl-again').value      = 0;
+  document.getElementById('ctrl-ae-mode').value    = 0;
+  syncLabel('ctrl-brightness', 'lbl-brightness', 2);
+  syncLabel('ctrl-contrast',   'lbl-contrast',   2);
+  syncLabel('ctrl-saturation', 'lbl-saturation', 2);
+  syncLabel('ctrl-sharpness',  'lbl-sharpness',  2);
+  syncLabel('ctrl-ev',         'lbl-ev',         1);
+  syncLabel('ctrl-again',      'lbl-again',      1);
   _setGainsActive(false);
   document.getElementById('ctrl-awb').value = 0;
   try {
@@ -1357,6 +1394,7 @@ async function resetAllControls() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         Brightness: 0, Contrast: 1, Saturation: 1, Sharpness: 1,
+        ExposureValue: 0, AnalogueGain: 0, AeConstraintMode: 0,
         AwbMode: 0, ColourGainR: 0, ColourGainB: 0,
       }),
     });
@@ -1382,6 +1420,17 @@ async function fetchCameraControls() {
     if ('Sharpness' in d) {
       document.getElementById('ctrl-sharpness').value = d.Sharpness;
       syncLabel('ctrl-sharpness', 'lbl-sharpness', 2);
+    }
+    if ('ExposureValue' in d) {
+      document.getElementById('ctrl-ev').value = d.ExposureValue;
+      syncLabel('ctrl-ev', 'lbl-ev', 1);
+    }
+    if ('AnalogueGain' in d) {
+      document.getElementById('ctrl-again').value = d.AnalogueGain;
+      syncLabel('ctrl-again', 'lbl-again', 1);
+    }
+    if ('AeConstraintMode' in d) {
+      document.getElementById('ctrl-ae-mode').value = d.AeConstraintMode;
     }
     if (d.ColourGainR > 0 && d.ColourGainB > 0) {
       document.getElementById('ctrl-gain-r').value = d.ColourGainR;
