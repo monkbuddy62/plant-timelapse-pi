@@ -12,7 +12,7 @@ echo "Installing system dependencies..."
 sudo apt-get install -y python3-venv
 
 echo "Creating virtual environment..."
-python3 -m venv "$INSTALL_DIR/venv"
+python3 -m venv "$INSTALL_DIR/venv" --system-site-packages
 "$INSTALL_DIR/venv/bin/pip" install -r requirements.txt
 
 echo "Installing systemd service..."
